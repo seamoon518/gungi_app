@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Environment variables (secrets)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+/tmp/
+
+# Next.js build output
+frontend/.next/
+frontend/out/
+
+# Node dependencies
+frontend/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
