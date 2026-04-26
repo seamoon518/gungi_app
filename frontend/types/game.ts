@@ -5,6 +5,10 @@ export type PieceType =
   | "槍" | "馬" | "忍" | "砦" | "兵"
   | "砲" | "筒" | "弓" | "謀";
 
+export type GameLevel = "nyumon" | "shokyuu" | "chukyuu" | "joukyuu";
+export type GameMode = "pvp" | "ai";
+export type AiDifficulty = "easy" | "normal" | "hard";
+
 export interface Piece {
   type: PieceType;
   owner: Player;
@@ -22,6 +26,9 @@ export interface GameState {
   game_over: boolean;
   winner: Player | null;
   move_count: number;
+  level: GameLevel;
+  phase: "setup" | "play";
+  setup_done: Record<Player, boolean>;
 }
 
 export interface ValidMovesResponse {

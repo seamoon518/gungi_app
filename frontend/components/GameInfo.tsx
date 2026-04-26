@@ -81,6 +81,12 @@ export default function GameInfo({
             : <p className="text-sm mt-1">千日手（引き分け）</p>
           }
         </div>
+      ) : state.phase === "setup" ? (
+        <div className="text-center">
+          <p className="text-xs text-amber-600 font-semibold">初期配置フェーズ</p>
+          <p className="text-xl font-bold mt-1">{PLAYER_LABEL[state.current_player]}</p>
+          <p className="text-xs text-gray-400 mt-1">駒を配置してください</p>
+        </div>
       ) : (
         <div className="text-center">
           <p className="text-xs text-gray-500">手番</p>
@@ -145,7 +151,7 @@ export default function GameInfo({
         <button onClick={onNewGame} className="px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition">
           新規ゲーム
         </button>
-        {!state.game_over && (
+        {!state.game_over && state.phase === "play" && (
           <button onClick={onResign} className="px-3 py-2 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300 transition">
             投了
           </button>

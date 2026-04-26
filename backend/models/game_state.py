@@ -3,6 +3,20 @@ from dataclasses import dataclass, field
 from models.piece import Piece
 
 
+@dataclass(frozen=True)
+class GameRules:
+    max_stack: int = 3
+    sui_can_tsuke: bool = True  # 師ツケ: 帅が他の駒の上に乗れるか
+
+
+RULES_BY_LEVEL: Dict[str, GameRules] = {
+    "nyumon":  GameRules(max_stack=2, sui_can_tsuke=False),
+    "shokyuu": GameRules(max_stack=2, sui_can_tsuke=False),
+    "chukyuu": GameRules(max_stack=2, sui_can_tsuke=True),
+    "joukyuu": GameRules(max_stack=3, sui_can_tsuke=True),
+}
+
+
 @dataclass
 class Move:
     from_row: int
@@ -24,6 +38,15 @@ class GameState:
     position_history: List[str] = field(default_factory=list)
     game_over: bool = False
     winner: Optional[Literal["black", "white"]] = None
+    level: str = "nyumon"
+    mode: str = "pvp"
+    ai_difficulty: Optional[str] = None
+    # "setup": 中級/上級の初期配置フェーズ, "play": 通常ゲーム
+    phase: Literal["setup", "play"] = "play"
+    setup_done: Dict[str, bool] = field(
+        default_factory=lambda: {"black": False, "white": False}
+    )
+    rules: GameRules = field(default_factory=GameRules)
 
     def board_to_dict(self) -> list:
         result = []
@@ -46,4 +69,7 @@ class GameState:
             "game_over": self.game_over,
             "winner": self.winner,
             "move_count": len(self.move_history),
+            "level": self.level,
+            "phase": self.phase,
+            "setup_done": dict(self.setup_done),
         }

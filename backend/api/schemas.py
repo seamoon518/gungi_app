@@ -1,5 +1,11 @@
 from pydantic import BaseModel
-from typing import Literal
+from typing import Literal, Optional
+
+
+class NewGameRequest(BaseModel):
+    level: Literal["nyumon", "shokyuu", "chukyuu", "joukyuu"] = "nyumon"
+    mode: Literal["pvp", "ai"] = "pvp"
+    ai_difficulty: Optional[Literal["easy", "normal", "hard"]] = None
 
 
 class MoveRequest(BaseModel):
@@ -23,3 +29,9 @@ class ArataRequest(BaseModel):
 
 class ValidArataResponse(BaseModel):
     valid_positions: list[list[int]]  # [[row, col], ...]
+
+
+class SetupPlaceRequest(BaseModel):
+    piece_type: str
+    to_row: int
+    to_col: int

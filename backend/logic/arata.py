@@ -17,7 +17,7 @@ from models.piece import Piece, PieceType
 Board = List[List[List[Piece]]]
 
 
-def get_valid_arata_positions(board: Board, player: str) -> List[Tuple[int, int]]:
+def get_valid_arata_positions(board: Board, player: str, max_stack: int = 3) -> List[Tuple[int, int]]:
     """Return all (row, col) squares valid for arata placement."""
     # Find frontmost own top-piece row
     frontmost_row: int | None = None
@@ -51,7 +51,7 @@ def get_valid_arata_positions(board: Board, player: str) -> List[Tuple[int, int]
             elif stack[-1].owner == player:
                 # Tsuke with arata: allow up to max height (3)
                 # Top must not be 帅
-                if len(stack) < 3 and stack[-1].type != PieceType.SUI:
+                if len(stack) < max_stack and stack[-1].type != PieceType.SUI:
                     valid.append((r, c))
             # enemy-top: skip
     return valid

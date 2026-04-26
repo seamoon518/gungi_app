@@ -4,13 +4,13 @@ Valid move calculation for Gungi pieces.
 Rules implemented:
 - Coordinate transform: +y = forward per player (black: row--, white: row++)
 - Path blocking: pieces can't jump over others (except 砲/筒/弓 with height conditions)
-- Tsuke (stack): allowed when destination stack height <= moving piece's height AND dest < 3
+- Tsuke (stack): allowed when destination stack height <= moving piece's height AND dest < max_stack
 - Tsuke onto OWN piece: always allowed (subject to height rules), unless top is 帥
 - Tsuke onto ENEMY piece: allowed (subject to same height rules), unless top is 帅
 - Capture: allowed when top piece is enemy AND dest stack <= moving piece's height
 - 帅 CANNOT be tsuke'd onto (absolute rule for both own and enemy)
-- 帅 CAN tsuke onto other pieces (no special restriction)
-- Max stack height: 3
+- 帅 can tsuke onto other pieces only when sui_can_tsuke=True (師ツケあり)
+- Max stack height: controlled by max_stack parameter (2 for 入門/初級/中級, 3 for 上級)
 
 Returns MoveOptions(valid_moves, enemy_tsuke_moves):
   valid_moves      - all valid destination squares
@@ -56,12 +56,12 @@ def _get_intermediate_squares(
     ]
 
 
-def _can_tsuke(board: Board, src_height: int, dst_row: int, dst_col: int) -> bool:
+def _can_tsuke(board: Board, src_height: int, dst_row: int, dst_col: int, max_stack: int = 3) -> bool:
     """Common tsuke conditions (ownership checked by caller)."""
     dst_stack = board[dst_row][dst_col]
     if not dst_stack:
         return False
-    if len(dst_stack) >= 3:
+    if len(dst_stack) >= max_stack:
         return False
     if len(dst_stack) > src_height:
         return False
@@ -102,9 +102,15 @@ def _transform(
     return src_row + row_mult * dy, src_col + dx
 
 
-def get_valid_moves(board: Board, row: int, col: int) -> MoveOptions:
+def get_valid_moves(
+    board: Board, row: int, col: int,
+    max_stack: int = 3, sui_can_tsuke: bool = True
+) -> MoveOptions:
     """
     Return MoveOptions with all valid destinations and enemy-tsuke-eligible squares.
+
+    max_stack: maximum stack height allowed (2 for 入門/初級/中級, 3 for 上級)
+    sui_can_tsuke: if False, 帅 cannot be placed on top of other pieces (師ツケなし)
     """
     stack = board[row][col]
     if not stack:
@@ -116,6 +122,10 @@ def get_valid_moves(board: Board, row: int, col: int) -> MoveOptions:
     src_height = len(stack)
 
     row_mult = -1 if player == "black" else 1
+
+    # When sui_can_tsuke=False and the moving piece is SUI,
+    # SUI can only move to empty squares (no tsuke in any form).
+    is_sui_no_tsuke = (piece_type == PieceType.SUI and not sui_can_tsuke)
 
     valid: List[Tuple[int, int]] = []
     enemy_tsuke: List[Tuple[int, int]] = []
@@ -135,16 +145,16 @@ def get_valid_moves(board: Board, row: int, col: int) -> MoveOptions:
         if not dst_stack:
             valid.append((dst_row, dst_col))
 
+        elif is_sui_no_tsuke:
+            pass  # SUI cannot tsuke onto anything when sui_can_tsuke=False
+
         elif dst_stack[-1].owner == player:
-            # Own piece: tsuke (帅 CAN tsuke now, only restrict destination being 帅)
-            if _can_tsuke(board, src_height, dst_row, dst_col):
+            if _can_tsuke(board, src_height, dst_row, dst_col, max_stack):
                 valid.append((dst_row, dst_col))
 
         else:
-            # Enemy piece: capture possible?
             can_cap = _can_capture(board, src_height, dst_row, dst_col, player)
-            # Enemy tsuke possible? (same height rules, top must not be 帅)
-            can_tsuke_e = _can_tsuke(board, src_height, dst_row, dst_col)
+            can_tsuke_e = _can_tsuke(board, src_height, dst_row, dst_col, max_stack)
 
             if can_cap or can_tsuke_e:
                 valid.append((dst_row, dst_col))
@@ -160,12 +170,12 @@ def get_valid_moves(board: Board, row: int, col: int) -> MoveOptions:
                 if not dst_stack:
                     valid.append((r, c))
                 elif dst_stack[-1].owner == player:
-                    if _can_tsuke(board, src_height, r, c):
+                    if not is_sui_no_tsuke and _can_tsuke(board, src_height, r, c, max_stack):
                         valid.append((r, c))
                     break
                 else:
                     can_cap = _can_capture(board, src_height, r, c, player)
-                    can_tsuke_e = _can_tsuke(board, src_height, r, c)
+                    can_tsuke_e = (not is_sui_no_tsuke) and _can_tsuke(board, src_height, r, c, max_stack)
                     if can_cap or can_tsuke_e:
                         valid.append((r, c))
                     if can_tsuke_e:
@@ -187,12 +197,12 @@ def get_valid_moves(board: Board, row: int, col: int) -> MoveOptions:
                 if not dst_stack:
                     valid.append((r, c))
                 elif dst_stack[-1].owner == player:
-                    if _can_tsuke(board, src_height, r, c):
+                    if not is_sui_no_tsuke and _can_tsuke(board, src_height, r, c, max_stack):
                         valid.append((r, c))
                     break
                 else:
                     can_cap = _can_capture(board, src_height, r, c, player)
-                    can_tsuke_e = _can_tsuke(board, src_height, r, c)
+                    can_tsuke_e = (not is_sui_no_tsuke) and _can_tsuke(board, src_height, r, c, max_stack)
                     if can_cap or can_tsuke_e:
                         valid.append((r, c))
                     if can_tsuke_e:
@@ -217,7 +227,7 @@ def get_valid_moves(board: Board, row: int, col: int) -> MoveOptions:
             path = _get_intermediate_squares(row, col, dst_row, dst_col)
             _try_add(dst_row, dst_col, path, is_jump=False)
 
-    # --- All other pieces: fixed moves, normal path blocking ---
+    # --- All other pieces (including 帅): fixed moves, normal path blocking ---
     else:
         for dx, dy in FIXED_MOVES.get(piece_type, {}).get(src_height, []):
             dst_row, dst_col = _transform(row, col, dx, dy, row_mult)
