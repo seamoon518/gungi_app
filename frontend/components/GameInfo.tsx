@@ -4,23 +4,21 @@ import { GameState, Piece, Player, PieceType } from "@/types/game";
 
 interface Props {
   state: GameState;
+  player: Player;              // このパネルが担当するプレイヤー
+  flipped?: boolean;           // true → 180°回転（白陣側パネル用）
   selectedHandPiece: PieceType | null;
   gizokuMode: boolean;
   onHandPieceClick: (type: PieceType) => void;
   onGizokuToggle: () => void;
-  onNewGame: () => void;
   onResign: () => void;
-  error: string | null;
+  onSetupDone?: () => void;    // 済を宣言（setup phaseのみ）
+  error?: string | null;
 }
 
 const PLAYER_LABEL: Record<Player, string> = { black: "黒陣", white: "白陣" };
 
 function HandPieces({
-  pieces,
-  player,
-  currentPlayer,
-  selectedHandPiece,
-  onHandPieceClick,
+  pieces, player, currentPlayer, selectedHandPiece, onHandPieceClick,
 }: {
   pieces: Piece[];
   player: Player;
@@ -33,24 +31,23 @@ function HandPieces({
   const grouped: Record<string, number> = {};
   for (const p of pieces) grouped[p.type] = (grouped[p.type] ?? 0) + 1;
 
-  const isCurrentPlayer = player === currentPlayer;
+  const isActive = player === currentPlayer;
 
   return (
     <div className="flex flex-wrap gap-1 mt-1">
       {Object.entries(grouped).map(([type, count]) => {
-        const isSelected = isCurrentPlayer && selectedHandPiece === type;
+        const isSelected = isActive && selectedHandPiece === type;
         return (
           <button
             key={type}
-            onClick={() => isCurrentPlayer && onHandPieceClick(type as PieceType)}
+            onClick={() => isActive && onHandPieceClick(type as PieceType)}
             className={`
               relative inline-flex items-center justify-center
               w-9 h-9 rounded-full border-2 text-xs font-bold transition-all
               ${player === "black" ? "bg-gray-900 text-white border-gray-700" : "bg-white text-gray-900 border-gray-400"}
               ${isSelected ? "ring-4 ring-yellow-400 scale-110" : ""}
-              ${isCurrentPlayer ? "cursor-pointer hover:scale-105" : "opacity-50 cursor-default"}
+              ${isActive ? "cursor-pointer hover:scale-105" : "opacity-50 cursor-default"}
             `}
-            title={isCurrentPlayer ? `${type}を打つ` : undefined}
           >
             {type}
             {count > 1 && (
@@ -66,80 +63,48 @@ function HandPieces({
 }
 
 export default function GameInfo({
-  state, selectedHandPiece, gizokuMode,
+  state, player, flipped = false,
+  selectedHandPiece, gizokuMode,
   onHandPieceClick, onGizokuToggle,
-  onNewGame, onResign, error,
+  onResign, onSetupDone, error,
 }: Props) {
-  return (
-    <div className="flex flex-col gap-3 p-4 bg-white rounded-lg shadow w-52">
-      {/* 手番 / ゲーム終了 */}
-      {state.game_over ? (
-        <div className="text-center">
-          <p className="text-lg font-bold text-red-600">ゲーム終了</p>
-          {state.winner
-            ? <p className="text-sm mt-1"><span className="font-semibold">{PLAYER_LABEL[state.winner]}</span> の勝利！</p>
-            : <p className="text-sm mt-1">千日手（引き分け）</p>
-          }
-        </div>
-      ) : state.phase === "setup" ? (
-        <div className="text-center">
-          <p className="text-xs text-amber-600 font-semibold">初期配置フェーズ</p>
-          <p className="text-xl font-bold mt-1">{PLAYER_LABEL[state.current_player]}</p>
-          <p className="text-xs text-gray-400 mt-1">駒を配置してください</p>
-        </div>
-      ) : (
-        <div className="text-center">
-          <p className="text-xs text-gray-500">手番</p>
-          <p className="text-xl font-bold mt-1">{PLAYER_LABEL[state.current_player]}</p>
-          <p className="text-xs text-gray-400 mt-1">{state.move_count} 手目</p>
-        </div>
-      )}
+  const isActive = state.current_player === player;
+  const isSetup = state.phase === "setup";
 
-      {error && <p className="text-xs text-red-500 text-center break-words">{error}</p>}
+  const panel = (
+    <div className="flex flex-col gap-2 p-3 bg-white rounded-xl shadow w-44">
 
-      {/* 凝ボタン */}
-      <button
-        onClick={onGizokuToggle}
-        className={`
-          w-full py-2 rounded-lg text-sm font-bold border-2 transition-all
-          ${gizokuMode
-            ? "bg-indigo-600 text-white border-indigo-600"
-            : "bg-white text-indigo-600 border-indigo-400 hover:bg-indigo-50"
-          }
-        `}
-        title="凝モード：駒をクリックするとスタックを確認できます"
-      >
-        {gizokuMode ? "凝モード ON" : "凝"}
-      </button>
-
-      {/* 白の手駒 */}
-      <div className="border-t pt-2">
-        <p className="text-xs font-semibold text-gray-600 mb-1">
-          白の手駒
-          {state.current_player === "white" && selectedHandPiece && (
-            <span className="ml-1 text-yellow-600">（{selectedHandPiece} 選択中）</span>
-          )}
+      {/* プレイヤー名 + 手番表示 */}
+      <div className="text-center">
+        <p className={`text-base font-bold ${isActive && !state.game_over ? "text-blue-600" : "text-gray-600"}`}>
+          {PLAYER_LABEL[player]}
         </p>
-        <HandPieces
-          pieces={state.hand_pieces?.white ?? []}
-          player="white"
-          currentPlayer={state.current_player}
-          selectedHandPiece={selectedHandPiece}
-          onHandPieceClick={onHandPieceClick}
-        />
+        {!state.game_over && (
+          <p className={`text-[10px] mt-0.5 ${isActive ? "text-blue-400 font-semibold" : "text-gray-300"}`}>
+            {isActive ? (isSetup ? "配置中" : "▶ 手番") : "待機中"}
+          </p>
+        )}
+        {state.game_over && state.winner === player && (
+          <p className="text-xs text-green-600 font-bold mt-0.5">🏆 勝利！</p>
+        )}
       </div>
 
-      {/* 黒の手駒 */}
+      {/* エラー */}
+      {isActive && error && (
+        <p className="text-[10px] text-red-500 text-center break-words">{error}</p>
+      )}
+
+      {/* 手駒 */}
       <div className="border-t pt-2">
-        <p className="text-xs font-semibold text-gray-600 mb-1">
-          黒の手駒
-          {state.current_player === "black" && selectedHandPiece && (
-            <span className="ml-1 text-yellow-600">（{selectedHandPiece} 選択中）</span>
+        <p className="text-xs font-semibold text-gray-500 mb-1">
+          手駒
+          {isActive && selectedHandPiece && (
+            <span className="ml-1 text-yellow-600">（{selectedHandPiece}）</span>
           )}
         </p>
         <HandPieces
-          pieces={state.hand_pieces?.black ?? []}
-          player="black"
+          pieces={state.hand_pieces?.[player] ?? []}
+          player={player}
           currentPlayer={state.current_player}
           selectedHandPiece={selectedHandPiece}
           onHandPieceClick={onHandPieceClick}
@@ -147,25 +112,56 @@ export default function GameInfo({
       </div>
 
       {/* ボタン群 */}
-      <div className="border-t pt-2 flex flex-col gap-2">
-        <button onClick={onNewGame} className="px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition">
-          新規ゲーム
+      <div className="border-t pt-2 flex flex-col gap-1.5">
+        {/* 凝ボタン */}
+        <button
+          onClick={onGizokuToggle}
+          className={`
+            w-full py-1.5 rounded-lg text-xs font-bold border-2 transition-all
+            ${gizokuMode
+              ? "bg-indigo-600 text-white border-indigo-600"
+              : "bg-white text-indigo-600 border-indigo-400 hover:bg-indigo-50"
+            }
+          `}
+        >
+          {gizokuMode ? "凝 ON" : "凝"}
         </button>
-        {!state.game_over && state.phase === "play" && (
-          <button onClick={onResign} className="px-3 py-2 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300 transition">
+
+        {/* 済を宣言（setupフェーズ・自分のターンのみ） */}
+        {isSetup && isActive && onSetupDone && !state.game_over && (
+          <button
+            onClick={onSetupDone}
+            className="w-full py-1.5 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 transition"
+          >
+            済を宣言
+          </button>
+        )}
+
+        {/* 投了（playフェーズ・自分のターンのみ） */}
+        {!isSetup && isActive && !state.game_over && (
+          <button
+            onClick={onResign}
+            className="w-full py-1.5 bg-gray-200 text-gray-700 text-xs rounded-lg hover:bg-gray-300 transition"
+          >
             投了
           </button>
         )}
       </div>
 
-      {/* 凡例 */}
-      <div className="text-xs text-gray-400 border-t pt-2 space-y-0.5">
-        <p className="font-semibold">凡例</p>
-        <p>緑背景 = 移動可</p>
-        <p>紫背景 = 手駒配置可</p>
-        <p>橙枠 = ツケも可</p>
-        <p>青枠 2段 / 赤枠 3段</p>
+      {/* 凡例（コンパクト） */}
+      <div className="text-[9px] text-gray-400 border-t pt-1.5 space-y-0.5">
+        <p>緑=移動可 紫=手駒配置 橙=ツケ可</p>
+        <p>青枠=2段 赤枠=3段</p>
       </div>
+    </div>
+  );
+
+  if (!flipped) return panel;
+
+  // 白陣パネルは180°回転して相手側から読めるようにする
+  return (
+    <div className="rotate-180">
+      {panel}
     </div>
   );
 }
