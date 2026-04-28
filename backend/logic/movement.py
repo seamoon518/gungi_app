@@ -145,16 +145,15 @@ def get_valid_moves(
         if not dst_stack:
             valid.append((dst_row, dst_col))
 
-        elif is_sui_no_tsuke:
-            pass  # SUI cannot tsuke onto anything when sui_can_tsuke=False
-
         elif dst_stack[-1].owner == player:
-            if _can_tsuke(board, src_height, dst_row, dst_col, max_stack):
+            # 自駒へのツケ（師ツケなしの場合はSUIのツケを禁止）
+            if not is_sui_no_tsuke and _can_tsuke(board, src_height, dst_row, dst_col, max_stack):
                 valid.append((dst_row, dst_col))
 
         else:
+            # 敵駒：取ることは常に可能、ツケは師ツケなしの場合SUIは禁止
             can_cap = _can_capture(board, src_height, dst_row, dst_col, player)
-            can_tsuke_e = _can_tsuke(board, src_height, dst_row, dst_col, max_stack)
+            can_tsuke_e = (not is_sui_no_tsuke) and _can_tsuke(board, src_height, dst_row, dst_col, max_stack)
 
             if can_cap or can_tsuke_e:
                 valid.append((dst_row, dst_col))
