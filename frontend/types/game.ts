@@ -29,6 +29,9 @@ export interface GameState {
   level: GameLevel;
   phase: "setup" | "play";
   setup_done: Record<Player, boolean>;
+  ai_player: Player | null;
+  mode: GameMode;
+  last_move: { from_row: number; from_col: number; to_row: number; to_col: number } | null;
 }
 
 export interface ValidMovesResponse {

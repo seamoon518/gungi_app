@@ -71,4 +71,7 @@ export const api = {
 
   setupDone: (gameId: string): Promise<GameState> =>
     request(`/game/${gameId}/setup/done`, { method: "POST" }),
+
+  aiMove: (gameId: string): Promise<GameState> =>
+    request(`/game/${gameId}/ai-move`, { method: "POST" }),
 };

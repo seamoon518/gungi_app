@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   GameState, MoveAction, Piece, PieceType,
   Player, GameLevel, GameMode, AiDifficulty,
@@ -61,12 +61,44 @@ export default function Home() {
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showHomeConfirm, setShowHomeConfirm] = useState(false);
 
   const clearAll = () => {
     setSelectedCell(null); setHighlights([]); setEnemyTsukeMoves([]);
     setPendingChoice(null); setSelectedHandPiece(null); setArataHighlights([]);
     setGizokuMode(false); setInspectStack(null); setError(null);
   };
+
+  // AI の手番を自動トリガー
+  const aiTriggeringRef = useRef(false);
+  useEffect(() => {
+    if (!gameState) return;
+    if (gameState.game_over) return;
+    if (gameState.mode !== "ai") return;
+    if (!gameState.ai_player) return;
+    if (gameState.current_player !== gameState.ai_player) return;
+    if (aiTriggeringRef.current) return;
+
+    aiTriggeringRef.current = true;
+    const timer = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const state = await api.aiMove(gameState.game_id);
+        setGameState(state);
+        clearAll();
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+        aiTriggeringRef.current = false;
+      }
+    }, 400);  // 少し待ってから思考（UX向上）
+
+    return () => {
+      clearTimeout(timer);
+      aiTriggeringRef.current = false;
+    };
+  }, [gameState?.game_id, gameState?.current_player, gameState?.game_over]);
 
   const handleSelectLevel = useCallback(async (level: GameLevel) => {
     setLoading(true); setError(null);
@@ -214,8 +246,54 @@ export default function Home() {
     executeMove, executeArata, executeSetupPlace,
   ]);
 
+  // ─── 共通: ホームボタン・確認モーダル・最終手ハイライト ──────────────
+  const lastMoveHighlights: [number, number][] = (() => {
+    const lm = gameState?.last_move;
+    if (!lm) return [];
+    const cells: [number, number][] = [[lm.to_row, lm.to_col]];
+    if (lm.from_row >= 0) cells.push([lm.from_row, lm.from_col]);
+    return cells;
+  })();
+
+  const homeBtn = (
+    <button
+      onClick={() => setShowHomeConfirm(true)}
+      className="fixed top-3 right-3 z-40 px-3 py-1.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-lg text-xs text-gray-500 hover:text-gray-800 hover:bg-white hover:border-gray-300 shadow-sm transition"
+    >
+      ← ホーム
+    </button>
+  );
+
+  const homeConfirmModal = showHomeConfirm ? (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]">
+      <div className="bg-white rounded-2xl shadow-xl p-6 w-72 flex flex-col gap-4">
+        <p className="text-center font-bold text-gray-800">タイトルに戻りますか？</p>
+        <p className="text-center text-sm text-gray-500">
+          {screen === "game" && gameState && !gameState.game_over
+            ? "対局が中断されます。進捗は保存されません。"
+            : "タイトル画面に移動します。"}
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowHomeConfirm(false)}
+            className="flex-1 py-2.5 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium"
+          >
+            キャンセル
+          </button>
+          <button
+            onClick={() => { setShowHomeConfirm(false); setScreen("title"); setGameState(null); clearAll(); }}
+            className="flex-1 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 text-sm font-medium"
+          >
+            戻る
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   // ─── ルール選択画面（PvP/AI 共通） ──────────────────────────────────
   const renderRuleSelect = (backScreen: Screen) => (
+    <>
     <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-5 p-4">
       <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍議</h1>
       <p className="text-lg text-gray-600">どのルールで遊びますか？</p>
@@ -242,6 +320,8 @@ export default function Home() {
       <button onClick={() => setScreen(backScreen)} className="text-sm text-gray-400 hover:text-gray-600 underline mt-1">← 戻る</button>
       {error && <p className="text-red-500 text-sm">{error}</p>}
     </main>
+    {homeBtn}{homeConfirmModal}
+    </>
   );
 
   // ─── Screens ────────────────────────────────────────────────────────
@@ -263,6 +343,7 @@ export default function Home() {
 
   if (screen === "mode_select") {
     return (
+      <>
       <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4">
         <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍議</h1>
         <p className="text-lg text-gray-600">対戦モードを選択してください</p>
@@ -274,15 +355,17 @@ export default function Home() {
             <span className="text-lg font-bold text-blue-700">プレイヤー同士で対戦</span>
             <span className="text-xs text-gray-500 mt-1">同じ画面で2人対戦します</span>
           </button>
-          {/* AI対戦は未実装 */}
-          <div className="flex flex-col items-start px-6 py-5 bg-gray-100 border-2 border-gray-300 rounded-xl opacity-50 cursor-not-allowed select-none">
-            <span className="text-lg font-bold text-gray-500">AIと対戦</span>
-            <span className="text-xs text-gray-400 mt-1">コンピューターと対戦します</span>
-            <span className="text-xs text-red-400 mt-1 font-semibold">未実装</span>
-          </div>
+          <button
+            onClick={() => { setGameMode("ai"); setScreen("ai_difficulty_select"); }}
+            className="flex flex-col items-start px-6 py-5 bg-white border-2 border-amber-500 rounded-xl hover:bg-amber-50 transition shadow"
+          >
+            <span className="text-lg font-bold text-amber-700">AIと対戦</span>
+            <span className="text-xs text-gray-500 mt-1">コンピューターと対戦します（α版）</span>
+          </button>
         </div>
-        <button onClick={() => setScreen("title")} className="text-sm text-gray-400 hover:text-gray-600 underline">← タイトルに戻る</button>
       </main>
+      {homeBtn}{homeConfirmModal}
+    </>
     );
   }
 
@@ -290,6 +373,7 @@ export default function Home() {
 
   if (screen === "ai_difficulty_select") {
     return (
+      <>
       <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4">
         <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍議</h1>
         <p className="text-lg text-gray-600">誰と対戦しますか？</p>
@@ -306,6 +390,8 @@ export default function Home() {
         </div>
         <button onClick={() => setScreen("mode_select")} className="text-sm text-gray-400 hover:text-gray-600 underline">← 戻る</button>
       </main>
+      {homeBtn}{homeConfirmModal}
+      </>
     );
   }
 
@@ -313,6 +399,7 @@ export default function Home() {
 
   // ─── ゲーム画面 ─────────────────────────────────────────────────────
   return (
+    <>
     <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center p-2 sm:p-4 gap-3">
       <h1 className="text-xl sm:text-2xl font-bold tracking-widest text-gray-800">軍議</h1>
 
@@ -378,6 +465,7 @@ export default function Home() {
                 highlights={highlights}
                 enemyTsukeMoves={enemyTsukeMoves}
                 arataHighlights={arataHighlights}
+                lastMoveHighlights={lastMoveHighlights}
                 gizokuMode={gizokuMode}
                 onCellClick={handleCellClick}
               />
@@ -444,9 +532,15 @@ export default function Home() {
 
       {loading && (
         <div className="fixed inset-0 bg-black/10 flex items-center justify-center pointer-events-none">
-          <div className="bg-white px-4 py-2 rounded shadow text-sm text-gray-600">処理中...</div>
+          <div className="bg-white px-4 py-2 rounded shadow text-sm text-gray-600">
+            {gameState?.mode === "ai" && gameState.current_player === gameState.ai_player
+              ? "AI 思考中..."
+              : "処理中..."}
+          </div>
         </div>
       )}
     </main>
+    {homeBtn}{homeConfirmModal}
+    </>
   );
 }

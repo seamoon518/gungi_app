@@ -10,6 +10,7 @@ interface Props {
   isHighlighted: boolean;
   isArataHighlight: boolean;
   isEnemyTsuke: boolean;
+  isLastMove: boolean;
   currentPlayer: Player;
   gizokuMode: boolean;
   onClick: () => void;
@@ -39,7 +40,7 @@ function getStackPositions(height: number): { top: number; left: number; size: n
 export default function Cell({
   cell, row, col,
   isSelected, isHighlighted, isArataHighlight, isEnemyTsuke,
-  gizokuMode,
+  isLastMove, gizokuMode,
   onClick,
 }: Props) {
   const stack = cell.stack;
@@ -52,6 +53,8 @@ export default function Cell({
     ? "bg-green-200"
     : isArataHighlight
     ? "bg-purple-200"
+    : isLastMove
+    ? "bg-sky-200"
     : (row + col) % 2 === 0
     ? "bg-amber-100"
     : "bg-amber-200";

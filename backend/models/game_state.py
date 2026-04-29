@@ -41,6 +41,7 @@ class GameState:
     level: str = "nyumon"
     mode: str = "pvp"
     ai_difficulty: Optional[str] = None
+    ai_player: Optional[Literal["black", "white"]] = None  # AI が担当するプレイヤー
     # "setup": 中級/上級の初期配置フェーズ, "play": 通常ゲーム
     phase: Literal["setup", "play"] = "play"
     setup_done: Dict[str, bool] = field(
@@ -70,6 +71,17 @@ class GameState:
             "winner": self.winner,
             "move_count": len(self.move_history),
             "level": self.level,
+            "mode": self.mode,
             "phase": self.phase,
             "setup_done": dict(self.setup_done),
+            "ai_player": self.ai_player,
+            "last_move": (
+                {
+                    "from_row": self.move_history[-1].from_row,
+                    "from_col": self.move_history[-1].from_col,
+                    "to_row":   self.move_history[-1].to_row,
+                    "to_col":   self.move_history[-1].to_col,
+                }
+                if self.move_history else None
+            ),
         }

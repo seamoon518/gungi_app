@@ -150,6 +150,7 @@ def _create_setup_state(
         phase="setup",
         setup_done={"black": False, "white": False},
         rules=rules,
+        # ai_player は create_initial_state で後から設定する
     )
 
 
@@ -159,18 +160,23 @@ def create_initial_state(
     ai_difficulty: Optional[str] = None,
 ) -> GameState:
     rules = RULES_BY_LEVEL.get(level, GameRules())
+    # AI対戦: AI は後手（白）、人間は先手（黒）
+    ai_player = "white" if mode == "ai" else None
+
     if level == "shokyuu":
-        return _create_fixed_state(
+        state = _create_fixed_state(
             level, mode, ai_difficulty, rules,
             _SHOKYUU_WHITE_LAYOUT, _SHOKYUU_BLACK_LAYOUT, _SHOKYUU_HAND_TYPES,
         )
     elif level in ("chukyuu", "joukyuu"):
-        return _create_setup_state(level, mode, ai_difficulty, rules)
+        state = _create_setup_state(level, mode, ai_difficulty, rules)
     else:  # nyumon (default)
-        return _create_fixed_state(
+        state = _create_fixed_state(
             level, mode, ai_difficulty, rules,
             _NYUMON_WHITE_LAYOUT, _NYUMON_BLACK_LAYOUT, _NYUMON_HAND_TYPES,
         )
+    state.ai_player = ai_player
+    return state
 
 
 def _is_enemy(board: Board, player: str, row: int, col: int) -> bool:

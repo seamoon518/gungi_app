@@ -8,6 +8,7 @@ from logic.game_engine import (
     create_initial_state, apply_move, apply_arata,
     apply_setup_place, apply_setup_done,
 )
+from logic.ai.engine import get_ai_move_and_apply
 from logic.movement import get_valid_moves
 from logic.arata import get_valid_arata_positions
 from logic.setup import get_valid_setup_positions
@@ -118,6 +119,22 @@ def setup_place(game_id: str, req: SetupPlaceRequest):
 def setup_done(game_id: str):
     state = _get_or_404(game_id)
     success, error = apply_setup_done(state)
+    if not success:
+        raise HTTPException(status_code=400, detail=error)
+    return state.to_dict(game_id)
+
+
+@router.post("/{game_id}/ai-move")
+def ai_move(game_id: str):
+    """AI の手番を処理する（setup / play 両フェーズ対応）"""
+    state = _get_or_404(game_id)
+    if state.mode != "ai":
+        raise HTTPException(status_code=400, detail="AI対戦モードではありません。")
+    if state.game_over:
+        raise HTTPException(status_code=400, detail="ゲームは終了しています。")
+    if state.current_player != state.ai_player:
+        raise HTTPException(status_code=400, detail="AI の手番ではありません。")
+    success, error = get_ai_move_and_apply(state)
     if not success:
         raise HTTPException(status_code=400, detail=error)
     return state.to_dict(game_id)

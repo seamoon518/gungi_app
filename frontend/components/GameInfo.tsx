@@ -70,6 +70,7 @@ export default function GameInfo({
 }: Props) {
   const isActive = state.current_player === player;
   const isSetup = state.phase === "setup";
+  const isAiControlled = state.ai_player === player;
 
   const panel = (
     <div className="flex flex-col gap-2 p-3 bg-white rounded-xl shadow w-44">
@@ -78,14 +79,21 @@ export default function GameInfo({
       <div className="text-center">
         <p className={`text-base font-bold ${isActive && !state.game_over ? "text-blue-600" : "text-gray-600"}`}>
           {PLAYER_LABEL[player]}
+          {isAiControlled && (
+            <span className="ml-1 text-xs text-amber-600 font-normal">（AI）</span>
+          )}
         </p>
         {!state.game_over && (
           <p className={`text-[10px] mt-0.5 ${isActive ? "text-blue-400 font-semibold" : "text-gray-300"}`}>
-            {isActive ? (isSetup ? "配置中" : "▶ 手番") : "待機中"}
+            {isActive
+              ? isAiControlled
+                ? "AI 思考中..."
+                : (isSetup ? "配置中" : "▶ 手番")
+              : "待機中"}
           </p>
         )}
         {state.game_over && state.winner === player && (
-          <p className="text-xs text-green-600 font-bold mt-0.5">🏆 勝利！</p>
+          <p className="text-xs text-green-600 font-bold mt-0.5">勝利！</p>
         )}
       </div>
 
@@ -98,22 +106,22 @@ export default function GameInfo({
       <div className="border-t pt-2">
         <p className="text-xs font-semibold text-gray-500 mb-1">
           手駒
-          {isActive && selectedHandPiece && (
+          {isActive && !isAiControlled && selectedHandPiece && (
             <span className="ml-1 text-yellow-600">（{selectedHandPiece}）</span>
           )}
         </p>
         <HandPieces
           pieces={state.hand_pieces?.[player] ?? []}
           player={player}
-          currentPlayer={state.current_player}
-          selectedHandPiece={selectedHandPiece}
-          onHandPieceClick={onHandPieceClick}
+          currentPlayer={isAiControlled ? "black" : state.current_player}
+          selectedHandPiece={isAiControlled ? null : selectedHandPiece}
+          onHandPieceClick={isAiControlled ? () => {} : onHandPieceClick}
         />
       </div>
 
       {/* ボタン群 */}
       <div className="border-t pt-2 flex flex-col gap-1.5">
-        {/* 凝ボタン */}
+        {/* 凝ボタン（AI側でも閲覧用に使える） */}
         <button
           onClick={onGizokuToggle}
           className={`
@@ -127,8 +135,8 @@ export default function GameInfo({
           {gizokuMode ? "凝 ON" : "凝"}
         </button>
 
-        {/* 済を宣言（setupフェーズ・自分のターンのみ） */}
-        {isSetup && isActive && onSetupDone && !state.game_over && (
+        {/* 済を宣言（setupフェーズ・自分のターン・人間のみ） */}
+        {isSetup && isActive && !isAiControlled && onSetupDone && !state.game_over && (
           <button
             onClick={onSetupDone}
             className="w-full py-1.5 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 transition"
@@ -137,8 +145,8 @@ export default function GameInfo({
           </button>
         )}
 
-        {/* 投了（playフェーズ・自分のターンのみ） */}
-        {!isSetup && isActive && !state.game_over && (
+        {/* 投了（playフェーズ・自分のターン・人間のみ） */}
+        {!isSetup && isActive && !isAiControlled && !state.game_over && (
           <button
             onClick={onResign}
             className="w-full py-1.5 bg-gray-200 text-gray-700 text-xs rounded-lg hover:bg-gray-300 transition"
