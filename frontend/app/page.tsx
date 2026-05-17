@@ -457,9 +457,8 @@ export default function Home() {
               error={gameState.current_player === "white" ? error : null}
             />
 
-            {/* ボード（モバイルはzoomで縮小、PCは等倍） */}
+            {/* ボード（セル自体がレスポンシブサイズ） */}
             <div className="flex justify-center items-start w-full lg:w-auto">
-              <div className="[zoom:0.67] sm:[zoom:0.8] md:[zoom:0.9] lg:[zoom:1]">
               <Board
                 state={gameState}
                 selectedCell={selectedCell}
@@ -470,7 +469,6 @@ export default function Home() {
                 gizokuMode={gizokuMode}
                 onCellClick={handleCellClick}
               />
-              </div>
             </div>
 
             {/* 黒陣パネル（通常） */}

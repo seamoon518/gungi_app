@@ -28,12 +28,12 @@ export default function Board({
       <div className="flex">
         <div className="w-6" />
         {Array.from({ length: 9 }, (_, c) => (
-          <div key={c} className="w-14 text-center text-xs text-gray-500 mb-1">{c + 1}</div>
+          <div key={c} className="w-9 sm:w-11 lg:w-14 text-center text-[9px] sm:text-[10px] lg:text-xs text-gray-500 mb-1">{c + 1}</div>
         ))}
       </div>
       {state.board.map((row, r) => (
         <div key={r} className="flex items-center">
-          <div className="w-6 text-xs text-gray-500 text-right pr-1">{r + 1}</div>
+          <div className="w-5 lg:w-6 text-[9px] lg:text-xs text-gray-500 text-right pr-1">{r + 1}</div>
           {row.map((cell, c) => (
             <Cell
               key={c}
