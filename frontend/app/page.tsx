@@ -294,7 +294,7 @@ export default function Home() {
   // ─── ルール選択画面（PvP/AI 共通） ──────────────────────────────────
   const renderRuleSelect = (backScreen: Screen) => (
     <>
-    <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-5 p-4">
+    <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-5 p-4 overflow-x-hidden w-full">
       <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍議</h1>
       <p className="text-lg text-gray-600">どのルールで遊びますか？</p>
       <div className="flex flex-col gap-3 w-full max-w-md">
@@ -328,7 +328,7 @@ export default function Home() {
 
   if (screen === "title") {
     return (
-      <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4">
+      <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4 w-full">
         <h1 className="text-4xl sm:text-5xl font-bold tracking-widest text-gray-800">軍議</h1>
         <p className="text-gray-500 text-sm">HUNTER×HUNTER の思考型ボードゲーム</p>
         <button
@@ -344,7 +344,7 @@ export default function Home() {
   if (screen === "mode_select") {
     return (
       <>
-      <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4">
+      <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4 overflow-x-hidden w-full">
         <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍議</h1>
         <p className="text-lg text-gray-600">対戦モードを選択してください</p>
         <div className="flex flex-col gap-4 w-full max-w-xs">
@@ -374,7 +374,7 @@ export default function Home() {
   if (screen === "ai_difficulty_select") {
     return (
       <>
-      <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4">
+      <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4 overflow-x-hidden w-full">
         <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍議</h1>
         <p className="text-lg text-gray-600">誰と対戦しますか？</p>
         <div className="flex flex-col gap-4 w-full max-w-xs">
@@ -400,7 +400,7 @@ export default function Home() {
   // ─── ゲーム画面 ─────────────────────────────────────────────────────
   return (
     <>
-    <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center p-2 sm:p-4 gap-3">
+    <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center p-2 sm:p-4 gap-3 overflow-x-hidden w-full">
       <h1 className="text-xl sm:text-2xl font-bold tracking-widest text-gray-800">軍議</h1>
 
       {gameState && (
@@ -418,7 +418,7 @@ export default function Home() {
 
           {/* setup フェーズバナー */}
           {gameState.phase === "setup" && (
-            <div className="bg-yellow-50 border-2 border-yellow-400 rounded-xl p-3 text-sm w-full max-w-lg">
+            <div className="bg-yellow-50 border-2 border-yellow-400 rounded-xl p-3 text-sm w-full">
               <p className="font-bold text-yellow-800 text-base mb-1">初期配置フェーズ</p>
               <p className="text-yellow-700 mb-2">
                 {!isSuiPlaced(gameState, gameState.current_player)
@@ -438,10 +438,10 @@ export default function Home() {
 
           {/*
             レイアウト:
-            ・スマホ（縦）: 白パネル(上,反転) → ボード → 黒パネル(下)
-            ・PC（横）:     白パネル(左,反転) | ボード | 黒パネル(右)
+            ・スマホ（縦）: 白パネル → ボード(zoom縮小) → 黒パネル（全幅）
+            ・PC（横）:     白パネル(左,回転) | ボード | 黒パネル(右)
           */}
-          <div className="flex flex-col lg:flex-row items-center lg:items-start gap-3">
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-start gap-3 w-full max-w-screen-xl">
 
             {/* 白陣パネル（180°回転） */}
             <GameInfo
@@ -457,8 +457,9 @@ export default function Home() {
               error={gameState.current_player === "white" ? error : null}
             />
 
-            {/* ボード（横スクロール対応） */}
-            <div className="overflow-x-auto">
+            {/* ボード（モバイルはzoomで縮小、PCは等倍） */}
+            <div className="flex justify-center items-start w-full lg:w-auto">
+              <div className="[zoom:0.67] sm:[zoom:0.8] md:[zoom:0.9] lg:[zoom:1]">
               <Board
                 state={gameState}
                 selectedCell={selectedCell}
@@ -469,6 +470,7 @@ export default function Home() {
                 gizokuMode={gizokuMode}
                 onCellClick={handleCellClick}
               />
+              </div>
             </div>
 
             {/* 黒陣パネル（通常） */}

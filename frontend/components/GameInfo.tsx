@@ -73,7 +73,7 @@ export default function GameInfo({
   const isAiControlled = state.ai_player === player;
 
   const panel = (
-    <div className="flex flex-col gap-2 p-3 bg-white rounded-xl shadow w-44">
+    <div className="flex flex-col gap-2 p-3 bg-white rounded-xl shadow w-full lg:w-44">
 
       {/* プレイヤー名 + 手番表示 */}
       <div className="text-center">
@@ -166,9 +166,9 @@ export default function GameInfo({
 
   if (!flipped) return panel;
 
-  // 白陣パネルは180°回転して相手側から読めるようにする
+  // モバイルでは回転なし、lg以上（デスクトップ卓上対戦）で180°回転
   return (
-    <div className="rotate-180">
+    <div className="lg:rotate-180">
       {panel}
     </div>
   );
