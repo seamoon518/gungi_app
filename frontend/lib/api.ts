@@ -74,4 +74,20 @@ export const api = {
 
   aiMove: (gameId: string): Promise<GameState> =>
     request(`/game/${gameId}/ai-move`, { method: "POST" }),
+
+  boushou: (
+    gameId: string,
+    fromRow: number, fromCol: number,
+    toRow: number, toCol: number,
+    targetIndex: number,
+  ): Promise<GameState> =>
+    request(`/game/${gameId}/boushou`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from_row: fromRow, from_col: fromCol,
+        to_row: toRow, to_col: toCol,
+        target_index: targetIndex,
+      }),
+    }),
 };

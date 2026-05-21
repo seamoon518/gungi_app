@@ -35,3 +35,11 @@ class SetupPlaceRequest(BaseModel):
     piece_type: str
     to_row: int
     to_col: int
+
+
+class BoushouRequest(BaseModel):
+    from_row: int
+    from_col: int
+    to_row: int
+    to_col: int
+    target_index: int  # ツケ前のdestスタック内の敵駒インデックス（0=最下段）

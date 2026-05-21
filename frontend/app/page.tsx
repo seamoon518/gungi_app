@@ -62,11 +62,14 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showHomeConfirm, setShowHomeConfirm] = useState(false);
+  // 謀の寝返り：対象選択モーダル用
+  const [boushouTargets, setBoushouTargets] = useState<{ index: number; piece: Piece }[] | null>(null);
 
   const clearAll = () => {
     setSelectedCell(null); setHighlights([]); setEnemyTsukeMoves([]);
     setPendingChoice(null); setSelectedHandPiece(null); setArataHighlights([]);
     setGizokuMode(false); setInspectStack(null); setError(null);
+    setBoushouTargets(null);
   };
 
   // AI の手番を自動トリガー
@@ -150,6 +153,24 @@ export default function Home() {
     } catch (e) { setError(String(e)); }
     finally { setLoading(false); }
   }, [gameState, selectedHandPiece]);
+
+  const executeBoushou = useCallback(async (targetIndex: number) => {
+    if (!gameState || !pendingChoice) return;
+    setLoading(true);
+    setBoushouTargets(null);
+    setPendingChoice(null);
+    try {
+      const state = await api.boushou(
+        gameState.game_id,
+        pendingChoice.fromRow, pendingChoice.fromCol,
+        pendingChoice.toRow, pendingChoice.toCol,
+        targetIndex,
+      );
+      setGameState(state);
+      clearAll();
+    } catch (e) { setError(String(e)); }
+    finally { setLoading(false); }
+  }, [gameState, pendingChoice]);
 
   const handleSetupDone = useCallback(async () => {
     if (!gameState || loading) return;
@@ -488,17 +509,58 @@ export default function Home() {
         </>
       )}
 
-      {/* 取る or ツケる 選択モーダル */}
-      {pendingChoice && (
+      {/* 取る / ツケる / 謀る 選択モーダル */}
+      {pendingChoice && !boushouTargets && (() => {
+        // 謀の寝返り発動条件チェック（render時に計算）
+        const srcStack = gameState?.board[pendingChoice.fromRow][pendingChoice.fromCol]?.stack ?? [];
+        const movingPiece = srcStack[srcStack.length - 1];
+        const isBou = movingPiece?.type === "謀";
+        const destStack = gameState?.board[pendingChoice.toRow][pendingChoice.toCol]?.stack ?? [];
+        const enemyPlayer = gameState?.current_player === "black" ? "white" : "black";
+        const handTypes = new Set((gameState?.hand_pieces[gameState.current_player] ?? []).map(p => p.type));
+        const targets = isBou
+          ? destStack.map((piece, index) => ({ index, piece })).filter(({ piece }) => piece.owner === enemyPlayer && handTypes.has(piece.type))
+          : [];
+
+        return (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl shadow-xl p-6 w-72 flex flex-col gap-4">
+              <p className="text-center font-bold text-gray-800">どうしますか？</p>
+              <p className="text-center text-sm text-gray-500">相手の駒の上に移動します</p>
+              <button onClick={() => executeMove(pendingChoice.fromRow, pendingChoice.fromCol, pendingChoice.toRow, pendingChoice.toCol, "capture")}
+                className="py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition">取る（敵駒を除去）</button>
+              <button onClick={() => executeMove(pendingChoice.fromRow, pendingChoice.fromCol, pendingChoice.toRow, pendingChoice.toCol, "tsuke_enemy")}
+                className="py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition">ツケる（重ねる）</button>
+              {targets.length > 0 && (
+                <button
+                  onClick={() => setBoushouTargets(targets)}
+                  className="py-3 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 transition"
+                >謀る（相手駒を寝返らせる）</button>
+              )}
+              <button onClick={() => setPendingChoice(null)} className="py-2 text-gray-500 text-sm hover:text-gray-800">キャンセル</button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 謀り対象選択モーダル */}
+      {pendingChoice && boushouTargets && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-xl p-6 w-72 flex flex-col gap-4">
-            <p className="text-center font-bold text-gray-800">どうしますか？</p>
-            <p className="text-center text-sm text-gray-500">相手の駒の上に移動します</p>
-            <button onClick={() => executeMove(pendingChoice.fromRow, pendingChoice.fromCol, pendingChoice.toRow, pendingChoice.toCol, "capture")}
-              className="py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition">取る（敵駒を除去）</button>
-            <button onClick={() => executeMove(pendingChoice.fromRow, pendingChoice.fromCol, pendingChoice.toRow, pendingChoice.toCol, "tsuke_enemy")}
-              className="py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition">ツケる（重ねる）</button>
-            <button onClick={() => setPendingChoice(null)} className="py-2 text-gray-500 text-sm hover:text-gray-800">キャンセル</button>
+            <p className="text-center font-bold text-gray-800">どの駒を寝返らせますか？</p>
+            <p className="text-center text-sm text-gray-500">選んだ敵駒と手駒の同種駒が入れ替わります</p>
+            {boushouTargets.map(({ index, piece }) => (
+              <button
+                key={index}
+                onClick={() => executeBoushou(index)}
+                className="py-3 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 transition"
+              >
+                {index === 0 ? "最下段" : `下から${index + 1}段目`}の「{piece.type}」を寝返らせる
+              </button>
+            ))}
+            <button onClick={() => setBoushouTargets(null)} className="py-2 text-gray-500 text-sm hover:text-gray-800">
+              ← 戻る
+            </button>
           </div>
         </div>
       )}

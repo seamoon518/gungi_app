@@ -292,6 +292,85 @@ def apply_arata(
     return _finish_turn(state, player)
 
 
+def apply_boushou(
+    state: GameState,
+    from_row: int, from_col: int,
+    to_row: int, to_col: int,
+    target_index: int,
+) -> Tuple[bool, str]:
+    """謀（ぼう）の寝返りを実行する。
+
+    ツケ先スタック内の指定した敵駒を除外し、
+    手駒の同種駒をその位置に差し込む。謀はスタック最上段に残る。
+    target_index はツケ実行「前」の destスタックのインデックス（0=最下段）。
+    """
+    if state.game_over:
+        return False, "Game is already over."
+    if state.phase != "play":
+        return False, "Not in play phase."
+
+    # 移動元の駒が謀であることを確認
+    src_stack = state.board[from_row][from_col]
+    if not src_stack:
+        return False, "No piece at source."
+    moving = src_stack[-1]
+    if moving.type != PieceType.BOU:
+        return False, "Moving piece is not 謀."
+    if moving.owner != state.current_player:
+        return False, "Not your piece."
+
+    # ツケが合法手かつ enemy_tsuke_moves に含まれることを確認
+    options = get_valid_moves(
+        state.board, from_row, from_col,
+        state.rules.max_stack, state.rules.sui_can_tsuke,
+    )
+    if (to_row, to_col) not in options.enemy_tsuke_moves:
+        return False, "Boushou requires a valid tsuke_enemy move."
+
+    # 対象インデックスのバリデーション
+    dst_stack = state.board[to_row][to_col]
+    if not dst_stack:
+        return False, "No pieces at destination."
+    if target_index < 0 or target_index >= len(dst_stack):
+        return False, "Invalid target index."
+
+    target_piece = dst_stack[target_index]
+    player = state.current_player
+    enemy = "white" if player == "black" else "black"
+    if target_piece.owner != enemy:
+        return False, "Target piece is not an enemy."
+
+    # 手駒に同種の駒があることを確認
+    hand = state.hand_pieces[player]
+    hand_idx = next((i for i, p in enumerate(hand) if p.type == target_piece.type), None)
+    if hand_idx is None:
+        return False, "No matching hand piece for boushou."
+
+    # 実行
+    new_board = copy.deepcopy(state.board)
+    new_hand = {k: list(v) for k, v in state.hand_pieces.items()}
+
+    # 手駒から同種駒を取り出す
+    own_piece = new_hand[player].pop(hand_idx)
+
+    # 謀を移動元から取り出す
+    bou_piece = new_board[from_row][from_col].pop()
+
+    # 敵駒を除外（ゲームから永久に削除）
+    new_board[to_row][to_col].pop(target_index)
+
+    # 同位置に自駒を挿入（置き換え）
+    new_board[to_row][to_col].insert(target_index, own_piece)
+
+    # 謀をスタック最上段に追加
+    new_board[to_row][to_col].append(bou_piece)
+
+    state.board = new_board
+    state.hand_pieces = new_hand
+    state.move_history.append(Move(from_row, from_col, to_row, to_col))
+    return _finish_turn(state, player)
+
+
 def apply_setup_place(
     state: GameState,
     piece_type_str: str,

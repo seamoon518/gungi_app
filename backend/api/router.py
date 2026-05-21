@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from models.game_state import GameState
 from logic.game_engine import (
     create_initial_state, apply_move, apply_arata,
-    apply_setup_place, apply_setup_done,
+    apply_setup_place, apply_setup_done, apply_boushou,
 )
 from logic.ai.engine import get_ai_move_and_apply
 from logic.movement import get_valid_moves
@@ -14,7 +14,7 @@ from logic.arata import get_valid_arata_positions
 from logic.setup import get_valid_setup_positions
 from api.schemas import (
     NewGameRequest, MoveRequest, ValidMovesResponse,
-    ArataRequest, ValidArataResponse, SetupPlaceRequest,
+    ArataRequest, ValidArataResponse, SetupPlaceRequest, BoushouRequest,
 )
 
 router = APIRouter(prefix="/game", tags=["game"])
@@ -135,6 +135,21 @@ def ai_move(game_id: str):
     if state.current_player != state.ai_player:
         raise HTTPException(status_code=400, detail="AI の手番ではありません。")
     success, error = get_ai_move_and_apply(state)
+    if not success:
+        raise HTTPException(status_code=400, detail=error)
+    return state.to_dict(game_id)
+
+
+@router.post("/{game_id}/boushou")
+def boushou(game_id: str, req: BoushouRequest):
+    """謀（ぼう）の寝返りを実行する"""
+    state = _get_or_404(game_id)
+    success, error = apply_boushou(
+        state,
+        req.from_row, req.from_col,
+        req.to_row, req.to_col,
+        req.target_index,
+    )
     if not success:
         raise HTTPException(status_code=400, detail=error)
     return state.to_dict(game_id)
