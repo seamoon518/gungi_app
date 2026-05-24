@@ -358,7 +358,7 @@ export default function Home() {
   if (screen === "title") {
     return (
       <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4 w-full">
-        <h1 className="text-4xl sm:text-5xl font-bold tracking-widest text-gray-800">軍議</h1>
+        <h1 className="text-4xl sm:text-5xl font-bold tracking-widest text-gray-800">軍議 <span className="text-lg font-normal text-gray-400">ver0</span></h1>
         <p className="text-gray-500 text-sm">HUNTER×HUNTER の思考型ボードゲーム</p>
         <button
           onClick={() => setScreen("mode_select")}
