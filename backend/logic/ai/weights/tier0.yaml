@@ -1,0 +1,23 @@
+# Tier 0: 現状の重み（Phase C evaluate.py から抽出）
+piece_values:
+  SUI: 100000
+  TAI: 700
+  CHU: 600
+  OZU: 550
+  TSU: 500
+  KIB: 450
+  YAR: 400
+  YUM: 350
+  SAM: 350
+  SHO: 300
+  SHI: 300
+  BOU: 300
+  TOR: 250
+  HYO: 100
+
+hand_piece_ratio: 0.8
+center_weight: 3
+stack_bonus_ratio: 0.12
+forward_weight: 5
+sui_safety_radius: 3
+sui_safety_penalty: 20

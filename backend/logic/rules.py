@@ -6,7 +6,7 @@ Game rule helpers for Gungi:
 """
 
 import json
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from models.piece import Piece, PieceType
 
@@ -97,32 +97,32 @@ def board_hash(board: Board) -> str:
     return "/".join(rows)
 
 
-def check_sennichite(position_history: List[str], current_hash: str) -> bool:
+def check_sennichite(position_history: List[int], current_hash: int) -> bool:
     """Return True if the current position has appeared 4 times (千日手)."""
-    return position_history.count(current_hash) >= 3
+    return position_history.count(current_hash) >= 4
 
 
 def check_boushou_defection(
     board: Board, piece: Piece, to_row: int, to_col: int, hand_pieces: List
-) -> Optional[PieceType]:
+) -> List[Tuple[int, PieceType]]:
     """
-    Check if 謀 defection (寝返り) can be triggered after tsuke-ing onto an enemy.
-    Returns the enemy PieceType to defect, or None if not applicable.
-    MVP: hand_pieces is always empty, so always returns None.
+    謀がツケ先スタック内の敵駒を寝返らせる際の候補を返す。
+    ツケ実行前の状態で呼び出す。スタックの全層を対象にする。
+
+    Returns
+    -------
+    list of (target_index, piece_type)
+        target_index はツケ実行前の dest スタックのインデックス（0=最下段）
     """
     if piece.type != PieceType.BOU:
-        return None
+        return []
     dest_stack = board[to_row][to_col]
     if not dest_stack:
-        return None
-    # The piece just moved is now on top; below it is the enemy piece we tsuked onto
-    if len(dest_stack) < 2:
-        return None
-    enemy_piece = dest_stack[-2]
-    if enemy_piece.owner == piece.owner:
-        return None
-    # Check if player has matching hand piece
-    enemy_type = enemy_piece.type
-    if any(p.type == enemy_type for p in hand_pieces):
-        return enemy_type
-    return None
+        return []
+    enemy = "white" if piece.owner == "black" else "black"
+    hand_types = {p.type for p in hand_pieces}
+    return [
+        (i, p.type)
+        for i, p in enumerate(dest_stack)
+        if p.owner == enemy and p.type in hand_types
+    ]

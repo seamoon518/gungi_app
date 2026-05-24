@@ -35,7 +35,7 @@ class GameState:
         default_factory=lambda: {"black": [], "white": []}
     )
     move_history: List[Move] = field(default_factory=list)
-    position_history: List[str] = field(default_factory=list)
+    position_history: List[int] = field(default_factory=list)
     game_over: bool = False
     winner: Optional[Literal["black", "white"]] = None
     level: str = "nyumon"

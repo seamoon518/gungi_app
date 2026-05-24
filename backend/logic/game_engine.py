@@ -28,6 +28,7 @@ from logic.rules import (
     apply_capture, apply_tsuke, apply_plain_move,
     get_winner, board_hash, check_sennichite,
 )
+from logic.zobrist import HASHER
 
 Board = List[List[List[Piece]]]
 
@@ -127,7 +128,7 @@ def _create_fixed_state(
         setup_done={"black": True, "white": True},
         rules=rules,
     )
-    state.position_history.append(board_hash(board))
+    state.position_history.append(HASHER.hash_state(state))
     return state
 
 
@@ -197,14 +198,16 @@ def _finish_turn(state: GameState, player: str) -> Tuple[bool, str]:
         state.winner = winner
         return True, ""
 
-    h = board_hash(state.board)
+    # 手番を先に切り替えてからハッシュを計算する。
+    # pvs 内のハッシュ（切り替え後）と一致させ、千日手回避ロジックを正しく機能させる。
+    state.current_player = "white" if player == "black" else "black"
+    h = HASHER.hash_state(state)
     state.position_history.append(h)
     if check_sennichite(state.position_history, h):
         state.game_over = True
         state.winner = None
         return True, ""
 
-    state.current_player = "white" if player == "black" else "black"
     return True, ""
 
 
@@ -431,7 +434,7 @@ def apply_setup_done(state: GameState) -> Tuple[bool, str]:
         # 後手が済を宣言 → ゲーム開始（先手が済を宣言していなくても）
         state.phase = "play"
         state.current_player = "black"
-        state.position_history.append(board_hash(state.board))
+        state.position_history.append(HASHER.hash_state(state))
     else:
         # 先手が済を宣言 → 後手のみ続けて配置できる
         state.current_player = "white"

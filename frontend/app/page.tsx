@@ -86,9 +86,17 @@ export default function Home() {
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
-        const state = await api.aiMove(gameState.game_id);
-        setGameState(state);
-        clearAll();
+        // セットアップフェーズで「済」宣言後はAIのターンが連続するため、ループで処理する
+        let currentState = gameState;
+        while (
+          currentState.current_player === currentState.ai_player &&
+          !currentState.game_over
+        ) {
+          const state = await api.aiMove(currentState.game_id);
+          setGameState(state);
+          clearAll();
+          currentState = state;
+        }
       } catch (e) {
         setError(String(e));
       } finally {

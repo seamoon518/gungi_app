@@ -31,3 +31,6 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# AI benchmark / game data / tuning data
+backend/data/

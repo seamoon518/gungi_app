@@ -135,11 +135,16 @@ export default function GameInfo({
           {gizokuMode ? "凝 ON" : "凝"}
         </button>
 
-        {/* 済を宣言（setupフェーズ・自分のターン・人間のみ） */}
-        {isSetup && isActive && !isAiControlled && onSetupDone && !state.game_over && (
+        {/* 済を宣言（setupフェーズ・人間のみ・未宣言の間は常に表示） */}
+        {isSetup && !isAiControlled && onSetupDone && !state.game_over && !state.setup_done[player] && (
           <button
-            onClick={onSetupDone}
-            className="w-full py-1.5 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-700 transition"
+            onClick={isActive ? onSetupDone : undefined}
+            disabled={!isActive}
+            className={`w-full py-1.5 text-xs font-bold rounded-lg transition ${
+              isActive
+                ? "bg-green-600 text-white hover:bg-green-700 cursor-pointer"
+                : "bg-gray-200 text-gray-400 cursor-default"
+            }`}
           >
             済を宣言
           </button>
