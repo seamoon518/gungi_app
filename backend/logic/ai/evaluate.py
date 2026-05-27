@@ -15,7 +15,7 @@ from typing import Dict, Optional
 
 from models.piece import PieceType
 from models.game_state import GameState
-from logic.piece_moves import FIXED_MOVES, JUMP_MOVES, NORMAL_MOVES, JUMP_PIECES
+from logic.piece_moves import FIXED_MOVES, JUMP_MOVES, NORMAL_MOVES, JUMP_PIECES, TAI_SLIDE_DIRS, CHU_SLIDE_DIRS
 from logic.rules import check_boushou_defection
 
 # ── Tier 0 既定値 ─────────────────────────────────────────────────────────────
@@ -455,23 +455,76 @@ def evaluate_bou_dynamic(
 def evaluate_sui_mobility(
     state: GameState, ai_player: str, weights: Optional[dict] = None
 ) -> int:
-    """帅が移動できるマス数（逃げ場）。weight=0 の間は無効。"""
+    """帅の逃げ場評価: 自帅の移動可能マス数 - 相手帅の移動可能マス数。"""
     weight = weights.get("sui_mobility_weight", 0) if weights else 0
     if weight == 0:
         return 0
-    return 0  # Tier 2 以降で実装
+
+    opponent = "white" if ai_player == "black" else "black"
+    score = 0
+
+    for player, sign in [(ai_player, 1), (opponent, -1)]:
+        row_mult = -1 if player == "black" else 1
+        for r in range(9):
+            for c in range(9):
+                stack = state.board[r][c]
+                if not stack or stack[-1].type != PieceType.SUI or stack[-1].owner != player:
+                    continue
+                h = min(len(stack), 3)
+                reachable = 0
+                for dx, dy in FIXED_MOVES.get(PieceType.SUI, {}).get(h, []):
+                    tr = r + row_mult * dy
+                    tc = c + dx
+                    if not (0 <= tr < 9 and 0 <= tc < 9):
+                        continue
+                    dst = state.board[tr][tc]
+                    if not dst or dst[-1].owner != player:
+                        reachable += 1
+                score += sign * reachable
+
+    return weight * score
 
 
-# ── H: 射線遮断ペナルティ（初期値 0） ────────────────────────────────────────
+# ── H: 射線遮断ペナルティ ────────────────────────────────────────────────────
 
 def evaluate_ray_blocking(
     state: GameState, ai_player: str, weights: Optional[dict] = None
 ) -> int:
-    """自駒が自軍の跳び駒の射線をブロックしているとペナルティ。weight=0 の間は無効。"""
+    """大/中のスライド射線を自駒が遮断している数をペナルティとして評価。"""
     weight = weights.get("ray_blocking_weight", 0) if weights else 0
     if weight == 0:
         return 0
-    return 0  # Tier 2 以降で実装
+
+    score = 0
+
+    for r in range(9):
+        for c in range(9):
+            stack = state.board[r][c]
+            if not stack:
+                continue
+            top = stack[-1]
+            if top.type == PieceType.TAI:
+                dirs = TAI_SLIDE_DIRS
+            elif top.type == PieceType.CHU:
+                dirs = CHU_SLIDE_DIRS
+            else:
+                continue
+
+            sign = 1 if top.owner == ai_player else -1
+
+            for dr, dc in dirs:
+                nr, nc = r + dr, c + dc
+                while 0 <= nr < 9 and 0 <= nc < 9:
+                    cell = state.board[nr][nc]
+                    if cell:
+                        if cell[-1].owner == top.owner:
+                            # 友軍が射線を遮断 → ペナルティ
+                            score -= sign * weight
+                        break
+                    nr += dr
+                    nc += dc
+
+    return score
 
 
 # ── ぶら下がり駒ペナルティ ───────────────────────────────────────────────────

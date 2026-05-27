@@ -1,6 +1,9 @@
 "use client";
 
+import { useRef } from "react";
 import { Cell as CellType, Piece, Player } from "@/types/game";
+
+const LONG_PRESS_MS = 500;
 
 interface Props {
   cell: CellType;
@@ -14,6 +17,7 @@ interface Props {
   currentPlayer: Player;
   gizokuMode: boolean;
   onClick: () => void;
+  onLongPress?: () => void; // 長押しでスタック確認（モバイル用）
 }
 
 /**
@@ -44,11 +48,33 @@ function getStackPositions(height: number) {
 export default function Cell({
   cell, row, col,
   isSelected, isHighlighted, isArataHighlight, isEnemyTsuke,
-  isLastMove, gizokuMode, onClick,
+  isLastMove, gizokuMode, onClick, onLongPress,
 }: Props) {
   const stack = cell.stack;
   const height = stack.length;
   const top = stack[height - 1];
+
+  // ── 長押し検出（モバイル向けスタック確認） ────────────────────────────────
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didLongPress   = useRef(false);
+
+  const handleTouchStart = () => {
+    didLongPress.current = false;
+    if (!onLongPress) return;
+    longPressTimer.current = setTimeout(() => {
+      didLongPress.current = true;
+      // 触覚フィードバック（対応端末のみ）
+      if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(40);
+      onLongPress();
+    }, LONG_PRESS_MS);
+  };
+  const cancelLongPress = () => {
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+  };
+  const handleClick = () => {
+    if (didLongPress.current) { didLongPress.current = false; return; } // 長押し後のクリックを無効化
+    onClick();
+  };
 
   const squareBg =
     isSelected       ? "bg-yellow-300" :
@@ -78,7 +104,10 @@ export default function Cell({
   return (
     <div
       className={`relative ${CELL} border border-gray-400 select-none hover:brightness-90 transition-all ${squareBg} ${cursor}`}
-      onClick={onClick}
+      onClick={handleClick}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={cancelLongPress}
+      onTouchMove={cancelLongPress}
     >
       {/* ── 通常ビュー（常にあり） ── */}
       {top && (

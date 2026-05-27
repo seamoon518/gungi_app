@@ -180,6 +180,13 @@ export default function Home() {
     finally { setLoading(false); }
   }, [gameState, pendingChoice]);
 
+  // 長押しでスタック確認（凝モード不要・モバイル向け）
+  const handleCellLongPress = useCallback((row: number, col: number) => {
+    if (!gameState) return;
+    const stack = gameState.board[row][col].stack;
+    setInspectStack(stack.length > 0 ? stack : null);
+  }, [gameState]);
+
   const handleSetupDone = useCallback(async () => {
     if (!gameState || loading) return;
     setLoading(true);
@@ -497,6 +504,7 @@ export default function Home() {
                 lastMoveHighlights={lastMoveHighlights}
                 gizokuMode={gizokuMode}
                 onCellClick={handleCellClick}
+                onCellLongPress={handleCellLongPress}
               />
             </div>
 
@@ -573,11 +581,12 @@ export default function Home() {
         </div>
       )}
 
-      {/* 凝 スタック確認モーダル */}
-      {gizokuMode && inspectStack !== null && (
+      {/* スタック確認モーダル（凝モードでのタップ or 長押しで表示） */}
+      {inspectStack !== null && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setInspectStack(null)}>
           <div className="bg-white rounded-2xl shadow-xl p-6 w-64 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
-            <p className="text-center font-bold text-gray-800">凝 — スタック確認</p>
+            <p className="text-center font-bold text-gray-800">スタック確認</p>
+            <p className="text-center text-[10px] text-gray-400">タップ外・閉じるで戻る</p>
             {inspectStack.length === 0 ? (
               <p className="text-center text-gray-400 text-sm">このマスは空です</p>
             ) : (
@@ -595,7 +604,7 @@ export default function Home() {
                 ))}
               </div>
             )}
-            <button onClick={() => setInspectStack(null)} className="text-sm text-gray-400 hover:text-gray-700 text-center">閉じる</button>
+            <button onClick={() => setInspectStack(null)} className="py-2 bg-gray-100 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium transition">閉じる</button>
           </div>
         </div>
       )}

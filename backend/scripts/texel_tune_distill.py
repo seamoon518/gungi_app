@@ -65,6 +65,8 @@ TUNABLE_PARAMS = [
     ("bou_defect_weight",        0.05, 0.0, 1.0, "謀動的価値重み"),
     ("hanging_penalty_ratio",    0.02, 0.0, 0.5, "ぶら下がりペナルティ"),
     ("frontline_weight",         1,    0,  20, "前線重み"),
+    ("sui_mobility_weight",      1,    0,  15, "帅逃げ場重み"),
+    ("ray_blocking_weight",      1,    0,  15, "射線遮断重み"),
 ]
 
 

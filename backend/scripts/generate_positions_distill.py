@@ -58,7 +58,7 @@ def _play_and_collect(args: tuple) -> list:
     from logic.ai.search import find_best_move
     from logic.ai.weights import load_weights
 
-    weights = load_weights("tier1")
+    weights = load_weights("tier2")
     state = create_initial_state(level=level, mode="ai", ai_difficulty="hard")
     state.ai_player = "white"
 

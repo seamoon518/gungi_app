@@ -12,11 +12,12 @@ interface Props {
   lastMoveHighlights: [number, number][];
   gizokuMode: boolean;
   onCellClick: (row: number, col: number) => void;
+  onCellLongPress: (row: number, col: number) => void; // 長押しでスタック確認（モバイル用）
 }
 
 export default function Board({
   state, selectedCell, highlights, enemyTsukeMoves,
-  arataHighlights, lastMoveHighlights, gizokuMode, onCellClick,
+  arataHighlights, lastMoveHighlights, gizokuMode, onCellClick, onCellLongPress,
 }: Props) {
   const highlightSet = new Set(highlights.map(([r, c]) => `${r},${c}`));
   const enemyTsukeSet = new Set(enemyTsukeMoves.map(([r, c]) => `${r},${c}`));
@@ -48,6 +49,7 @@ export default function Board({
               currentPlayer={state.current_player}
               gizokuMode={gizokuMode}
               onClick={() => onCellClick(r, c)}
+              onLongPress={() => onCellLongPress(r, c)}
             />
           ))}
         </div>
