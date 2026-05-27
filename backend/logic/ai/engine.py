@@ -22,11 +22,11 @@ _SETUP_PRIORITY = [
     PieceType.TOR, PieceType.SHO, PieceType.HYO,
 ]
 
-# 難易度パラメータ（Tier 1: 共通評価関数 + 思考時間で差別化）
+# 難易度パラメータ（tier2評価関数 + 思考時間・ノイズで差別化）
 _DIFFICULTY_PARAMS = {
-    "easy":   {"max_depth": 4,  "time_limit": 1.0,  "noise": 50, "max_moves": 20, "weights": "tier1"},
-    "normal": {"max_depth": 8,  "time_limit": 3.0,  "noise": 10, "max_moves": 20, "weights": "tier1"},
-    "hard":   {"max_depth": 12, "time_limit": 5.0,  "noise": 0,  "max_moves": 15, "weights": "tier1"},
+    "easy":   {"max_depth": 4,  "time_limit": 1.0,  "noise": 50, "max_moves": 20, "weights": "tier2"},
+    "normal": {"max_depth": 8,  "time_limit": 3.0,  "noise": 10, "max_moves": 20, "weights": "tier2"},
+    "hard":   {"max_depth": 12, "time_limit": 5.0,  "noise": 0,  "max_moves": 15, "weights": "tier2"},
 }
 
 # レベル別の深さ調整（time_limit 主導になったため全レベル 1.0 に統一）

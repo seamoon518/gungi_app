@@ -1,3 +1,7 @@
+# cycle: 5
+# date: 2026-05-27T16:30:31.251745
+# bench (vs tier1): 0W 1D 5L win_rate=0.0%
+# adopted: True
 piece_values:
   SUI: 100000
   TAI: 400

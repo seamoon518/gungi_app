@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m scripts.run_distillation --skip-gen --base tier2 --p2 3 --p3 0.5 --p4 0 --parallel 4)"
+    ]
+  }
+}

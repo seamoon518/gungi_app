@@ -372,6 +372,7 @@ def pvs(
     weights: Optional[dict] = None,
     null_move_allowed: bool = True,
     position_counter: Optional[Counter] = None,
+    search_path_counter: Optional[Counter] = None,
 ) -> float:
 
     if time.time() - start_time > time_limit:
@@ -379,9 +380,15 @@ def pvs(
 
     key = _state_key(state)
 
-    # ── 千日手回避: この局面が実ゲームで 3回以上登場 → 次に戻ると千日手 ─────
-    if position_counter and position_counter.get(key, 0) >= 3:
+    # ── 千日手回避: 実ゲーム履歴 + 探索パス内の合計出現回数が 3回以上 ─────────
+    game_count = position_counter.get(key, 0) if position_counter else 0
+    path_count = search_path_counter.get(key, 0) if search_path_counter else 0
+    if game_count + path_count >= 3:
         return 0
+
+    # 探索パスカウンタに現局面を登録（バックトラック時に -1）
+    if search_path_counter is not None:
+        search_path_counter[key] += 1
 
     # ── TT lookup ────────────────────────────────────────────────────────────
     entry = tt.lookup(key)
@@ -425,6 +432,7 @@ def pvs(
                 tt, killers, history, weights,
                 null_move_allowed=False,
                 position_counter=position_counter,
+                search_path_counter=search_path_counter,
             )
             if null_score >= beta:
                 return beta   # null move cutoff
@@ -457,48 +465,49 @@ def pvs(
                      if (depth >= 3 and i >= 4 and _is_quiet(move))
                      else 0)
 
-        _pc = position_counter  # 短縮エイリアス
+        _pc  = position_counter       # 短縮エイリアス
+        _spc = search_path_counter    # 短縮エイリアス
         if i == 0:
             # ── 主分岐: フルウィンドウ ─────────────────────────────────────
             v = pvs(ns, ai_player, depth - 1, alpha, beta,
                     start_time, time_limit, max_moves,
                     tt, killers, history, weights,
-                    position_counter=_pc)
+                    position_counter=_pc, search_path_counter=_spc)
         else:
             if maximizing:
                 # ── 零窓 + LMR ────────────────────────────────────────────
                 v = pvs(ns, ai_player, depth - 1 - reduction, alpha, alpha + 1,
                         start_time, time_limit, max_moves,
                         tt, killers, history, weights,
-                        position_counter=_pc)
+                        position_counter=_pc, search_path_counter=_spc)
                 # LMR fail-high → フル深さで零窓再探索
                 if v > alpha and reduction > 0:
                     v = pvs(ns, ai_player, depth - 1, alpha, alpha + 1,
                             start_time, time_limit, max_moves,
                             tt, killers, history, weights,
-                            position_counter=_pc)
+                            position_counter=_pc, search_path_counter=_spc)
                 # 零窓 fail-high → フルウィンドウ再探索
                 if v > alpha and v < beta:
                     v = pvs(ns, ai_player, depth - 1, alpha, beta,
                             start_time, time_limit, max_moves,
                             tt, killers, history, weights,
-                            position_counter=_pc)
+                            position_counter=_pc, search_path_counter=_spc)
             else:
                 # ── 最小化側 ──────────────────────────────────────────────
                 v = pvs(ns, ai_player, depth - 1 - reduction, beta - 1, beta,
                         start_time, time_limit, max_moves,
                         tt, killers, history, weights,
-                        position_counter=_pc)
+                        position_counter=_pc, search_path_counter=_spc)
                 if v < beta and reduction > 0:
                     v = pvs(ns, ai_player, depth - 1, beta - 1, beta,
                             start_time, time_limit, max_moves,
                             tt, killers, history, weights,
-                            position_counter=_pc)
+                            position_counter=_pc, search_path_counter=_spc)
                 if v < beta and v > alpha:
                     v = pvs(ns, ai_player, depth - 1, alpha, beta,
                             start_time, time_limit, max_moves,
                             tt, killers, history, weights,
-                            position_counter=_pc)
+                            position_counter=_pc, search_path_counter=_spc)
 
         # ── スコア更新 ───────────────────────────────────────────────────────
         if maximizing:
@@ -526,6 +535,10 @@ def pvs(
                 else TT_EXACT)
         tt.store(key, depth, best_score, flag, best_move)
 
+    # バックトラック: この局面をパスカウンタから除去
+    if search_path_counter is not None:
+        search_path_counter[key] -= 1
+
     fallback = evaluate(state, ai_player, weights)
     if maximizing:
         return best_score if best_score > -inf else fallback
@@ -542,10 +555,12 @@ def find_best_move(
     noise: int = 0,
     max_moves: int = 25,
     weights: Optional[dict] = None,
+    return_score: bool = False,
 ) -> Optional[tuple]:
     """
     反復深化 + PVS + Aspiration Window で最善手を返す。
     時間切れ時は直前の深さの結果を使用。
+    return_score=True のとき (best_move, prev_score) を返す（蒸留学習用）。
     """
     moves = get_all_game_moves(state, ai_player)
     if not moves:
@@ -569,6 +584,8 @@ def find_best_move(
 
     # 実ゲームの局面出現回数を O(1) で参照できるように Counter 化
     position_counter: Counter = Counter(state.position_history)
+    # 探索パス内の繰り返し検出用カウンタ（各反復深化で毎回リセット）
+    search_path_counter: Counter = Counter()
 
     prev_score = 0
 
@@ -598,6 +615,7 @@ def find_best_move(
                         start_time, time_limit, max_moves,
                         tt, killers, history, weights,
                         position_counter=position_counter,
+                        search_path_counter=search_path_counter,
                     )
                     current_scored.append((score, move))
                     alpha_root = max(alpha_root, score)
@@ -643,4 +661,6 @@ def find_best_move(
         if best_move in moves:
             moves = [best_move] + [m for m in moves if m != best_move]
 
+    if return_score:
+        return (best_move, prev_score) if best_move is not None else None
     return best_move

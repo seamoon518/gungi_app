@@ -22,7 +22,7 @@ from typing import Optional
 
 def _run_one(args: tuple) -> dict:
     """multiprocessing ワーカー: 1局を実行して結果 dict を返す。"""
-    baseline, candidate, level, max_moves, time_budget, black_is_a, game_idx, run_id, save_dir = args
+    baseline, candidate, level, max_moves, time_budget, black_is_a, game_idx, run_id, save_dir, baseline_tl, candidate_tl = args
 
     # ワーカーは独立プロセスなので sys.path 調整が必要な場合がある
     import sys
@@ -33,8 +33,8 @@ def _run_one(args: tuple) -> dict:
 
     from scripts.selfplay import play_game
 
-    baseline_cfg = {"weights": baseline, "max_depth": 6, "time_limit": time_budget, "noise": 0, "max_moves": 15}
-    candidate_cfg = {"weights": candidate, "max_depth": 6, "time_limit": time_budget, "noise": 0, "max_moves": 15}
+    baseline_cfg = {"weights": baseline, "max_depth": 6, "time_limit": baseline_tl, "noise": 0, "max_moves": 15}
+    candidate_cfg = {"weights": candidate, "max_depth": 6, "time_limit": candidate_tl, "noise": 0, "max_moves": 15}
 
     record = play_game(
         ai_a_config=baseline_cfg,
@@ -70,6 +70,8 @@ def run_benchmark(
     level: str = "joukyuu",
     parallel: int = 4,
     time_budget: float = 5.0,
+    baseline_time_budget: Optional[float] = None,
+    candidate_time_budget: Optional[float] = None,
     max_moves: int = 300,
     output_dir: Optional[str] = None,
     save_games: bool = True,
@@ -98,16 +100,19 @@ def run_benchmark(
     """
     run_id = str(uuid.uuid4())[:8]
     save_dir = output_dir if save_games else None
+    btl = baseline_time_budget if baseline_time_budget is not None else time_budget
+    ctl = candidate_time_budget if candidate_time_budget is not None else time_budget
 
     # 先後入れ替え: 前半は ai_a=黒, 後半は ai_a=白
     half = games // 2
     tasks = []
     for i in range(half):
-        tasks.append((baseline, candidate, level, max_moves, time_budget, True, i, run_id, save_dir))
+        tasks.append((baseline, candidate, level, max_moves, time_budget, True, i, run_id, save_dir, btl, ctl))
     for i in range(games - half):
-        tasks.append((baseline, candidate, level, max_moves, time_budget, False, half + i, run_id, save_dir))
+        tasks.append((baseline, candidate, level, max_moves, time_budget, False, half + i, run_id, save_dir, btl, ctl))
 
-    print(f"[benchmark] {baseline} vs {candidate} | {games} games | level={level} | parallel={parallel}")
+    tl_info = f"baseline={btl}s candidate={ctl}s" if btl != ctl else f"tl={btl}s"
+    print(f"[benchmark] {baseline} vs {candidate} | {games} games | level={level} | parallel={parallel} | {tl_info}")
     t_start = time.time()
 
     results = []
@@ -179,8 +184,12 @@ def main():
     parser.add_argument("--level",       default="joukyuu",
                         choices=["nyumon", "shokyuu", "chukyuu", "joukyuu"])
     parser.add_argument("--parallel",    type=int,   default=4)
-    parser.add_argument("--time-budget", type=float, default=5.0, dest="time_budget")
-    parser.add_argument("--max-moves",   type=int,   default=300, dest="max_moves")
+    parser.add_argument("--time-budget",    type=float, default=5.0,  dest="time_budget")
+    parser.add_argument("--baseline-tl",   type=float, default=None, dest="baseline_tl",
+                        help="baseline の思考時間（省略時は --time-budget を使用）")
+    parser.add_argument("--candidate-tl",  type=float, default=None, dest="candidate_tl",
+                        help="candidate の思考時間（省略時は --time-budget を使用）")
+    parser.add_argument("--max-moves",     type=int,   default=300, dest="max_moves")
     parser.add_argument("--output",      default="data/benchmarks/", dest="output_dir")
     parser.add_argument("--no-save-games", action="store_true", dest="no_save_games")
     args = parser.parse_args()
@@ -192,6 +201,8 @@ def main():
         level=args.level,
         parallel=args.parallel,
         time_budget=args.time_budget,
+        baseline_time_budget=args.baseline_tl,
+        candidate_time_budget=args.candidate_tl,
         max_moves=args.max_moves,
         output_dir=args.output_dir,
         save_games=not args.no_save_games,
