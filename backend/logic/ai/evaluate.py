@@ -16,6 +16,7 @@ from typing import Dict, Optional
 from models.piece import PieceType
 from models.game_state import GameState
 from logic.piece_moves import FIXED_MOVES, JUMP_MOVES, NORMAL_MOVES, JUMP_PIECES, TAI_SLIDE_DIRS, CHU_SLIDE_DIRS
+from logic.arata import get_valid_arata_positions
 from logic.rules import check_boushou_defection
 
 # ── Tier 0 既定値 ─────────────────────────────────────────────────────────────
@@ -619,6 +620,37 @@ def evaluate_frontline(
     return score
 
 
+# ── 新置きゾーン支配 ─────────────────────────────────────────────────────────
+
+def evaluate_arata_control(
+    state: GameState, ai_player: str, weights: Optional[dict] = None
+) -> int:
+    """
+    有効な新置き(arata)マス数の差を評価。
+    前線が進むほどアラタゾーンが広がる軍議特有のメカニクスを捉える。
+    前方のマスほど高い重みをつける（前線を押し上げるインセンティブ）。
+    """
+    weight = weights.get("arata_control_weight", 0) if weights else 0
+    if weight == 0:
+        return 0
+
+    max_stack = 3
+    if hasattr(state, "rules") and state.rules:
+        max_stack = getattr(state.rules, "max_stack", 3)
+
+    opponent = "white" if ai_player == "black" else "black"
+
+    def _weighted_spots(player: str) -> float:
+        spots = get_valid_arata_positions(state.board, player, max_stack)
+        total = 0.0
+        for r, c in spots:
+            forward = (8 - r) / 8.0 if player == "black" else r / 8.0
+            total += 1.0 + forward  # 基本 1 + 前方ボーナス最大 1
+        return total
+
+    return int(weight * (_weighted_spots(ai_player) - _weighted_spots(opponent)))
+
+
 # ── 総合評価 ──────────────────────────────────────────────────────────────────
 
 def evaluate(state: GameState, ai_player: str, weights: Optional[dict] = None) -> int:
@@ -637,4 +669,5 @@ def evaluate(state: GameState, ai_player: str, weights: Optional[dict] = None) -
         + evaluate_ray_blocking(state, ai_player, weights)
         + evaluate_hanging_penalty(state, ai_player, weights)
         + evaluate_frontline(state, ai_player, weights)
+        + evaluate_arata_control(state, ai_player, weights)
     )

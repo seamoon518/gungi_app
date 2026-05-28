@@ -164,7 +164,7 @@ export default function GameInfo({
       {/* 凡例（コンパクト） */}
       <div className="text-[9px] text-gray-400 border-t pt-1.5 space-y-0.5">
         <p>緑=移動可 紫=手駒配置 橙=ツケ可</p>
-        <p>青枠=2段 赤枠=3段</p>
+        <p>赤=相手の移動範囲 青枠=2段 赤枠=3段</p>
       </div>
     </div>
   );

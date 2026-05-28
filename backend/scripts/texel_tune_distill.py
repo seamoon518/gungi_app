@@ -14,8 +14,10 @@ Usage:
 
 import argparse
 import copy
+import math
 import pathlib
 import pickle
+import random
 import sys
 import time
 
@@ -67,6 +69,7 @@ TUNABLE_PARAMS = [
     ("frontline_weight",         1,    0,  20, "前線重み"),
     ("sui_mobility_weight",      1,    0,  15, "帅逃げ場重み"),
     ("ray_blocking_weight",      1,    0,  15, "射線遮断重み"),
+    ("arata_control_weight",     1,    0,  20, "新置きゾーン支配"),
 ]
 
 
@@ -181,6 +184,120 @@ def tune(
     print(f"[distill-tune] 完了  final_loss={current_loss:.2f}  iterations={iteration}",
           flush=True)
     return best
+
+
+def tune_spsa(
+    positions_raw: list,
+    weights: dict,
+    time_budget_hours: float,
+    out_path: str,
+    batch_size: int = 5000,
+) -> dict:
+    """
+    SPSA (Simultaneous Perturbation Stochastic Approximation) チューナー。
+    全パラメータを同時にランダム方向へ摂動し勾配を推定する。
+    座標降下が詰まる局所最適を抜け出せる。
+    """
+    deadline = time.time() + time_budget_hours * 3600
+    start    = time.time()
+    n        = len(TUNABLE_PARAMS)
+
+    print(f"[spsa] {len(positions_raw)} 件を deserialize 中...", flush=True)
+    t0 = time.time()
+    positions = [(deserialize_state(d), s) for d, s in positions_raw]
+    print(f"[spsa] done ({time.time()-t0:.1f}s)  batch_size={batch_size}", flush=True)
+
+    # パラメータを [0, 1] に正規化
+    def _to_norm(w: dict) -> list:
+        return [(_get(w, p) - lo) / (hi - lo + 1e-9)
+                for p, _, lo, hi, _ in TUNABLE_PARAMS]
+
+    def _from_norm(theta: list) -> dict:
+        w = copy.deepcopy(weights)
+        for i, (path, step, lo, hi, _) in enumerate(TUNABLE_PARAMS):
+            raw = theta[i] * (hi - lo) + lo
+            # 整数ステップ: step>=1 なら丸める
+            if step >= 1:
+                raw = float(int(round(raw / step)) * int(step))
+            else:
+                raw = round(raw / step) * step
+            w = _set(w, path, _clamp(raw, lo, hi))
+        return w
+
+    theta_init = _to_norm(weights)
+
+    # 損失スケールを事前計算（損失が数百万オーダーになるため正規化して学習率崩壊を防ぐ）
+    _scale_batch = random.sample(positions, min(batch_size, len(positions)))
+    _init_w = _from_norm(theta_init)
+    loss_scale = max(1.0, sum((t - evaluate(s, "white", _init_w)) ** 2
+                              for s, t in _scale_batch) / len(_scale_batch))
+    print(f"[spsa] loss_scale={loss_scale:.0f}", flush=True)
+
+    def _batch_loss(theta: list) -> float:
+        w = _from_norm(theta)
+        batch = random.sample(positions, min(batch_size, len(positions)))
+        return sum((t - evaluate(s, "white", w)) ** 2 for s, t in batch) / len(batch) / loss_scale
+
+    # SPSA ハイパーパラメータ
+    alpha = 0.602
+    gamma = 0.101
+    A = 100  # 50→100: 学習率の減衰を緩やかに
+
+    # 自動学習率調整: 正規化損失スケールで最初のステップが 5% 程度になるよう設定
+    print("[spsa] 学習率を自動調整中...", flush=True)
+    trial_delta = [random.choice([-1, 1]) for _ in range(n)]
+    c_trial = 0.1
+    tp = [_clamp(theta_init[i] + c_trial * trial_delta[i], 0.0, 1.0) for i in range(n)]
+    tm = [_clamp(theta_init[i] - c_trial * trial_delta[i], 0.0, 1.0) for i in range(n)]
+    Lp_trial = _batch_loss(tp)
+    Lm_trial = _batch_loss(tm)
+    avg_g = abs(Lp_trial - Lm_trial) / (2.0 * c_trial * n + 1e-9)
+    target_step = 0.05  # 正規化後スケール用（0.02→0.05）
+    a = max(1e-4, min(target_step * (A + 1) ** alpha / (avg_g + 1e-9), 200.0))
+    c = 0.1
+    print(f"[spsa] a={a:.5f}  c={c}  avg_grad={avg_g:.6f}", flush=True)
+    print(f"[spsa] 初期損失 = {compute_loss(positions[:batch_size], weights):.2f}", flush=True)
+
+    theta = list(theta_init)
+    best_theta = list(theta)
+    best_loss = compute_loss(positions, weights)
+    iteration = 0
+    last_check = time.time()
+
+    while time.time() < deadline:
+        iteration += 1
+        a_k = a / (A + iteration) ** alpha
+        c_k = c / iteration ** gamma
+
+        delta = [random.choice([-1, 1]) for _ in range(n)]
+        theta_p = [_clamp(theta[i] + c_k * delta[i], 0.0, 1.0) for i in range(n)]
+        theta_m = [_clamp(theta[i] - c_k * delta[i], 0.0, 1.0) for i in range(n)]
+
+        Lp = _batch_loss(theta_p)
+        Lm = _batch_loss(theta_m)
+
+        # 勾配推定 → パラメータ更新
+        for i in range(n):
+            g_hat = (Lp - Lm) / (2.0 * c_k * delta[i] + 1e-12)
+            theta[i] = _clamp(theta[i] - a_k * g_hat, 0.0, 1.0)
+
+        # 50イテレーションごと or 5分ごとに全データで損失確認
+        if iteration % 50 == 0 or time.time() - last_check > 300:
+            full_loss = compute_loss(positions, _from_norm(theta))
+            elapsed   = (time.time() - start) / 3600
+            remaining = max(0.0, deadline - time.time()) / 3600
+            print(f"  iter={iteration:4d}  loss={full_loss:.2f}  a_k={a_k:.5f}"
+                  f"  elapsed={elapsed:.2f}h  remaining={remaining:.2f}h", flush=True)
+            if full_loss < best_loss:
+                best_loss  = full_loss
+                best_theta = list(theta)
+                _save_yaml(_from_norm(best_theta), out_path)
+                print(f"  [best updated] {best_loss:.2f}", flush=True)
+            last_check = time.time()
+
+    best_weights = _from_norm(best_theta)
+    print(f"[spsa] 完了  iterations={iteration}  best_loss={best_loss:.2f}", flush=True)
+    return best_weights
 
 
 def _save_yaml(weights: dict, path: str) -> None:

@@ -13,16 +13,20 @@ interface Props {
   gizokuMode: boolean;
   onCellClick: (row: number, col: number) => void;
   onCellLongPress: (row: number, col: number) => void; // 長押しでスタック確認（モバイル用）
+  enemyPreviewCell: [number, number] | null;  // 相手駒プレビュー中のセル
+  enemyPreviewMoves: [number, number][];       // 相手駒の移動可能範囲
 }
 
 export default function Board({
   state, selectedCell, highlights, enemyTsukeMoves,
   arataHighlights, lastMoveHighlights, gizokuMode, onCellClick, onCellLongPress,
+  enemyPreviewCell, enemyPreviewMoves,
 }: Props) {
   const highlightSet = new Set(highlights.map(([r, c]) => `${r},${c}`));
   const enemyTsukeSet = new Set(enemyTsukeMoves.map(([r, c]) => `${r},${c}`));
   const arataSet = new Set(arataHighlights.map(([r, c]) => `${r},${c}`));
   const lastMoveSet = new Set(lastMoveHighlights.map(([r, c]) => `${r},${c}`));
+  const enemyPreviewMoveSet = new Set(enemyPreviewMoves.map(([r, c]) => `${r},${c}`));
 
   return (
     <div className="flex flex-col items-center">
@@ -46,6 +50,8 @@ export default function Board({
               isArataHighlight={arataSet.has(`${r},${c}`)}
               isEnemyTsuke={enemyTsukeSet.has(`${r},${c}`)}
               isLastMove={lastMoveSet.has(`${r},${c}`)}
+              isEnemyPreviewCell={enemyPreviewCell !== null && enemyPreviewCell[0] === r && enemyPreviewCell[1] === c}
+              isEnemyMovePreview={enemyPreviewMoveSet.has(`${r},${c}`)}
               currentPlayer={state.current_player}
               gizokuMode={gizokuMode}
               onClick={() => onCellClick(r, c)}

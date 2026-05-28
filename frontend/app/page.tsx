@@ -51,6 +51,9 @@ export default function Home() {
   const [selectedCell, setSelectedCell] = useState<[number, number] | null>(null);
   const [highlights, setHighlights] = useState<[number, number][]>([]);
   const [enemyTsukeMoves, setEnemyTsukeMoves] = useState<[number, number][]>([]);
+  // 相手駒の移動範囲プレビュー
+  const [enemyPreviewCell, setEnemyPreviewCell] = useState<[number, number] | null>(null);
+  const [enemyPreviewMoves, setEnemyPreviewMoves] = useState<[number, number][]>([]);
   const [pendingChoice, setPendingChoice] = useState<PendingChoice | null>(null);
 
   const [selectedHandPiece, setSelectedHandPiece] = useState<PieceType | null>(null);
@@ -70,6 +73,7 @@ export default function Home() {
     setPendingChoice(null); setSelectedHandPiece(null); setArataHighlights([]);
     setGizokuMode(false); setInspectStack(null); setError(null);
     setBoushouTargets(null);
+    setEnemyPreviewCell(null); setEnemyPreviewMoves([]);
   };
 
   // AI の手番を自動トリガー
@@ -263,10 +267,33 @@ export default function Home() {
     }
 
     const stack = gameState.board[row][col].stack;
-    if (!stack.length) { setSelectedCell(null); setHighlights([]); setEnemyTsukeMoves([]); return; }
+    if (!stack.length) {
+      setSelectedCell(null); setHighlights([]); setEnemyTsukeMoves([]);
+      setEnemyPreviewCell(null); setEnemyPreviewMoves([]);
+      return;
+    }
     const topPiece = stack[stack.length - 1];
-    if (topPiece.owner !== gameState.current_player) { setSelectedCell(null); setHighlights([]); setEnemyTsukeMoves([]); return; }
 
+    if (topPiece.owner !== gameState.current_player) {
+      // ── 相手駒タップ → 移動範囲プレビュー ────────────────────────────────
+      if (enemyPreviewCell?.[0] === row && enemyPreviewCell?.[1] === col) {
+        // 同じセルを再タップ → プレビュー解除
+        setEnemyPreviewCell(null); setEnemyPreviewMoves([]);
+      } else {
+        setSelectedCell(null); setHighlights([]); setEnemyTsukeMoves([]);
+        setSelectedHandPiece(null); setArataHighlights([]);
+        setLoading(true);
+        try {
+          const { valid_moves } = await api.getValidMoves(gameState.game_id, row, col);
+          setEnemyPreviewCell([row, col]);
+          setEnemyPreviewMoves(valid_moves as [number, number][]);
+        } catch (e) { setError(String(e)); }
+        finally { setLoading(false); }
+      }
+      return;
+    }
+
+    // ── 自駒タップ → 合法手表示（プレビューをクリア） ────────────────────
     setLoading(true);
     try {
       const { valid_moves, enemy_tsuke_moves } = await api.getValidMoves(gameState.game_id, row, col);
@@ -274,6 +301,7 @@ export default function Home() {
       setHighlights(valid_moves as [number, number][]);
       setEnemyTsukeMoves(enemy_tsuke_moves as [number, number][]);
       setSelectedHandPiece(null); setArataHighlights([]);
+      setEnemyPreviewCell(null); setEnemyPreviewMoves([]);
     } catch (e) { setError(String(e)); }
     finally { setLoading(false); }
   }, [
@@ -365,7 +393,7 @@ export default function Home() {
   if (screen === "title") {
     return (
       <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4 w-full">
-        <h1 className="text-4xl sm:text-5xl font-bold tracking-widest text-gray-800">軍議 <span className="text-lg font-normal text-gray-400">ver0</span></h1>
+        <h1 className="text-4xl sm:text-5xl font-bold tracking-widest text-gray-800">軍議 <span className="text-lg font-normal text-gray-400">ver 1</span></h1>
         <p className="text-gray-500 text-sm">HUNTER×HUNTER の思考型ボードゲーム</p>
         <button
           onClick={() => setScreen("mode_select")}
@@ -505,6 +533,8 @@ export default function Home() {
                 gizokuMode={gizokuMode}
                 onCellClick={handleCellClick}
                 onCellLongPress={handleCellLongPress}
+                enemyPreviewCell={enemyPreviewCell}
+                enemyPreviewMoves={enemyPreviewMoves}
               />
             </div>
 

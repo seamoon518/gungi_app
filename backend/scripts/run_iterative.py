@@ -143,6 +143,8 @@ def main():
     parser.add_argument("--tl",       type=float, default=5.0,  help="生成時の思考時間(s/手)")
     parser.add_argument("--parallel", type=int,   default=4)
     parser.add_argument("--level",    default="joukyuu")
+    parser.add_argument("--tuner",    default="spsa",
+                        choices=["spsa", "coord"], help="チューナー種別")
     parser.add_argument("--start-cycle", type=int, default=1,  help="途中再開用サイクル番号")
     args = parser.parse_args()
 
@@ -156,8 +158,11 @@ def main():
     print("=" * 60, flush=True)
 
     from scripts.generate_positions_distill import generate
-    from scripts.texel_tune_distill import tune
+    from scripts.texel_tune_distill import tune, tune_spsa
     from logic.ai.weights import load_weights
+
+    _tuner = tune_spsa if args.tuner == "spsa" else tune
+    print(f"[init] チューナー: {args.tuner}", flush=True)
 
     tier1_weights = load_weights("tier1")
 
@@ -207,7 +212,7 @@ def main():
         print(f"\n[cycle {cycle}] Phase B: チューニング ({args.tune}h)", flush=True)
         with open(DISTILL_PATH, "rb") as f:
             positions_raw = pickle.load(f)
-        new_weights = tune(positions_raw, best_weights, args.tune, TIER2_PATH)
+        new_weights = _tuner(positions_raw, best_weights, args.tune, TIER2_PATH)
         _save_yaml(new_weights, TIER2_PATH)
 
         # ── ベンチマーク ──────────────────────────────────────────────
