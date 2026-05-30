@@ -12,6 +12,7 @@ interface Props {
   onGizokuToggle: () => void;
   onResign: () => void;
   onSetupDone?: () => void;    // 済を宣言（setup phaseのみ）
+  onUndo?: () => void;         // 待った（手を取り消す）
   error?: string | null;
 }
 
@@ -66,7 +67,7 @@ export default function GameInfo({
   state, player, flipped = false,
   selectedHandPiece, gizokuMode,
   onHandPieceClick, onGizokuToggle,
-  onResign, onSetupDone, error,
+  onResign, onSetupDone, onUndo, error,
 }: Props) {
   const isActive = state.current_player === player;
   const isSetup = state.phase === "setup";
@@ -157,6 +158,16 @@ export default function GameInfo({
             className="w-full py-1.5 bg-gray-200 text-gray-700 text-xs rounded-lg hover:bg-gray-300 transition"
           >
             投了
+          </button>
+        )}
+
+        {/* 待った（人間のみ・自分のターン・ゲーム未終了） */}
+        {!isAiControlled && isActive && !state.game_over && onUndo && (
+          <button
+            onClick={onUndo}
+            className="w-full py-1.5 bg-orange-100 text-orange-700 text-xs rounded-lg border border-orange-300 hover:bg-orange-200 transition"
+          >
+            待った
           </button>
         )}
       </div>

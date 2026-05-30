@@ -140,6 +140,39 @@ def ai_move(game_id: str):
     return state.to_dict(game_id)
 
 
+@router.post("/{game_id}/undo")
+def undo(game_id: str):
+    """待った: 直前の手を取り消す。
+    - PvP モード: 1手戻す
+    - AI モード (play フェーズ): 2手戻す（人間の手＋AIの応手をまとめて取り消し）
+    - AI モード (setup フェーズ): 2手戻す（人間の配置＋AIの配置をまとめて取り消し）
+    """
+    state = _get_or_404(game_id)
+    if state.game_over:
+        raise HTTPException(status_code=400, detail="ゲームは終了しています。")
+
+    snapshots = state.state_snapshots
+    if not snapshots:
+        raise HTTPException(status_code=400, detail="これ以上待ったできません。")
+
+    # AI対戦では 2手分まとめて戻す（可能な限り）
+    undo_count = 2 if state.mode == "ai" else 1
+    available = len(snapshots)
+    undo_count = min(undo_count, available)
+
+    # 目的のスナップショットを取り出す
+    target = snapshots[-(undo_count)]
+    # スナップショットを切り詰める（対象より後を削除）
+    del snapshots[-(undo_count):]
+
+    # target に現在の（切り詰めた）スナップショットリストを引き継ぐ
+    target.state_snapshots = snapshots
+
+    # ゲーム辞書を復元した状態で上書き
+    _games[game_id] = target
+    return target.to_dict(game_id)
+
+
 @router.post("/{game_id}/boushou")
 def boushou(game_id: str, req: BoushouRequest):
     """謀（ぼう）の寝返りを実行する"""

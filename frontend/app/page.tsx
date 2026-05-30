@@ -201,6 +201,16 @@ export default function Home() {
     finally { setLoading(false); }
   }, [gameState, loading]);
 
+  const handleUndo = useCallback(async () => {
+    if (!gameState || loading) return;
+    setLoading(true);
+    try {
+      const state = await api.undo(gameState.game_id);
+      setGameState(state); clearAll();
+    } catch (e) { setError(String(e)); }
+    finally { setLoading(false); }
+  }, [gameState, loading]);
+
   const handleHandPieceClick = useCallback(async (type: PieceType) => {
     if (!gameState || loading) return;
     setError(null);
@@ -518,6 +528,7 @@ export default function Home() {
               onGizokuToggle={() => { setGizokuMode(v => !v); setSelectedCell(null); setHighlights([]); setEnemyTsukeMoves([]); setSelectedHandPiece(null); setArataHighlights([]); setInspectStack(null); }}
               onResign={handleResign}
               onSetupDone={handleSetupDone}
+              onUndo={handleUndo}
               error={gameState.current_player === "white" ? error : null}
             />
 
@@ -549,6 +560,7 @@ export default function Home() {
               onGizokuToggle={() => { setGizokuMode(v => !v); setSelectedCell(null); setHighlights([]); setEnemyTsukeMoves([]); setSelectedHandPiece(null); setArataHighlights([]); setInspectStack(null); }}
               onResign={handleResign}
               onSetupDone={handleSetupDone}
+              onUndo={handleUndo}
               error={gameState.current_player === "black" ? error : null}
             />
           </div>

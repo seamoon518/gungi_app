@@ -90,4 +90,7 @@ export const api = {
         target_index: targetIndex,
       }),
     }),
+
+  undo: (gameId: string): Promise<GameState> =>
+    request(`/game/${gameId}/undo`, { method: "POST" }),
 };

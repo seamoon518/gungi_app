@@ -1,0 +1,47 @@
+# cycle: 5
+# date: 2026-05-28T23:10:08.311319
+# bench (vs tier1): 1W 0D 5L win_rate=16.7%
+# adopted: True
+piece_values:
+  SUI: 100000
+  TAI: 400
+  CHU: 400
+  OZU: 225.0
+  TSU: 250.0
+  KIB: 100
+  YAR: 150.0
+  YUM: 150.0
+  SHO: 175.0
+  SAM: 150.0
+  SHI: 125.0
+  BOU: 75.0
+  TOR: 100.0
+  HYO: 40.0
+hand_piece_ratio:
+  opening: 1.6
+  middle: 1.85
+  endgame: 1.4000000000000001
+phase_thresholds:
+  opening: 35
+  endgame: 19
+center_weight: 3.0
+stack_bonus_ratio: 0
+forward_weight: 3.0
+sui_safety_radius: 3
+sui_safety_penalty: 50
+stack_height_bonus:
+- 1.0
+- 1.36
+- 1.6600000000000001
+stack_risk_penalty_ratio: 0
+mobility_weight: 3.0
+jumping_threat_weight: 14.0
+jumping_sui_threat_weight: 200
+sui_fortress_weight: 18.0
+isolated_penalty_ratio: 0.08
+bou_defect_weight: 0.55
+sui_mobility_weight: 0
+ray_blocking_weight: 0
+hanging_penalty_ratio: 0.12
+frontline_weight: 16.0
+arata_control_weight: 0

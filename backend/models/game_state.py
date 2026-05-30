@@ -1,6 +1,9 @@
-from typing import List, Optional, Literal, Dict
+from typing import List, Optional, Literal, Dict, Any
 from dataclasses import dataclass, field
 from models.piece import Piece
+
+# 待った機能で保持するスナップショットの最大数（手数）
+MAX_UNDO_SNAPSHOTS = 10
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,8 @@ class GameState:
         default_factory=lambda: {"black": False, "white": False}
     )
     rules: GameRules = field(default_factory=GameRules)
+    # 待った用スナップショット（GameState の deepcopy。snapshots フィールドは除外して保存）
+    state_snapshots: List[Any] = field(default_factory=list)
 
     def board_to_dict(self) -> list:
         result = []

@@ -20,7 +20,7 @@ import copy
 from typing import List, Tuple, Optional
 
 from models.piece import Piece, PieceType
-from models.game_state import GameState, Move, GameRules, RULES_BY_LEVEL
+from models.game_state import GameState, Move, GameRules, RULES_BY_LEVEL, MAX_UNDO_SNAPSHOTS
 from logic.movement import get_valid_moves
 from logic.arata import get_valid_arata_positions
 from logic.setup import get_valid_setup_positions, has_placed_sui
@@ -96,6 +96,17 @@ _ALL_PIECE_TYPES = [
     PieceType.YUM, PieceType.YUM,
     PieceType.BOU,
 ]
+
+
+def _save_snapshot(state: GameState) -> None:
+    """待った用に現在の状態をスナップショットとして保存する。
+    スナップショット自体は含めない（メモリ肥大防止）。"""
+    snap = copy.deepcopy(state)
+    snap.state_snapshots = []       # スナップショット内にスナップショットを持たない
+    state.state_snapshots.append(snap)
+    # 上限を超えた分は古いものから削除
+    if len(state.state_snapshots) > MAX_UNDO_SNAPSHOTS:
+        state.state_snapshots.pop(0)
 
 
 def _make_empty_board() -> Board:
@@ -221,6 +232,7 @@ def apply_move(
         return False, "Game is already over."
     if state.phase != "play":
         return False, "初期配置フェーズ中は駒を動かせません。"
+    _save_snapshot(state)
 
     src_stack = state.board[from_row][from_col]
     if not src_stack:
@@ -269,6 +281,7 @@ def apply_arata(
         return False, "Game is already over."
     if state.phase != "play":
         return False, "初期配置フェーズ中は新を使えません。"
+    _save_snapshot(state)
 
     player = state.current_player
 
@@ -311,6 +324,7 @@ def apply_boushou(
         return False, "Game is already over."
     if state.phase != "play":
         return False, "Not in play phase."
+    _save_snapshot(state)
 
     # 移動元の駒が謀であることを確認
     src_stack = state.board[from_row][from_col]
@@ -383,6 +397,7 @@ def apply_setup_place(
     """Place a piece during the setup phase (中級/上級)."""
     if state.phase != "setup":
         return False, "初期配置フェーズではありません。"
+    _save_snapshot(state)
 
     player = state.current_player
 
@@ -422,6 +437,7 @@ def apply_setup_done(state: GameState) -> Tuple[bool, str]:
     """Declare 済 during setup phase."""
     if state.phase != "setup":
         return False, "初期配置フェーズではありません。"
+    _save_snapshot(state)
 
     player = state.current_player
 
