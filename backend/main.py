@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.router import router
 
-app = FastAPI(title="軍議 API", version="0.1.0")
+app = FastAPI(title="軍儀 API", version="0.1.0")
 
 allowed_origins = os.getenv(
     "ALLOWED_ORIGINS",

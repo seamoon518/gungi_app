@@ -627,7 +627,7 @@ def evaluate_arata_control(
 ) -> int:
     """
     有効な新置き(arata)マス数の差を評価。
-    前線が進むほどアラタゾーンが広がる軍議特有のメカニクスを捉える。
+    前線が進むほどアラタゾーンが広がる軍儀特有のメカニクスを捉える。
     前方のマスほど高い重みをつける（前線を押し上げるインセンティブ）。
     """
     weight = weights.get("arata_control_weight", 0) if weights else 0

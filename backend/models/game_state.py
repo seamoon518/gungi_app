@@ -43,8 +43,10 @@ class GameState:
     winner: Optional[Literal["black", "white"]] = None
     level: str = "nyumon"
     mode: str = "pvp"
-    ai_difficulty: Optional[str] = None
-    ai_player: Optional[Literal["black", "white"]] = None  # AI が担当するプレイヤー
+    ai_difficulty: Optional[str] = None          # AI vs Human の難易度（後方互換）
+    ai_player: Optional[str] = None              # "black" / "white" / "both"（AI同士）
+    ai_difficulty_black: Optional[str] = None    # AI同士: 黒の難易度
+    ai_difficulty_white: Optional[str] = None    # AI同士: 白の難易度
     # "setup": 中級/上級の初期配置フェーズ, "play": 通常ゲーム
     phase: Literal["setup", "play"] = "play"
     setup_done: Dict[str, bool] = field(
@@ -80,6 +82,8 @@ class GameState:
             "phase": self.phase,
             "setup_done": dict(self.setup_done),
             "ai_player": self.ai_player,
+            "ai_difficulty_black": self.ai_difficulty_black,
+            "ai_difficulty_white": self.ai_difficulty_white,
             "last_move": (
                 {
                     "from_row": self.move_history[-1].from_row,

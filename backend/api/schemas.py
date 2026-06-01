@@ -4,8 +4,11 @@ from typing import Literal, Optional
 
 class NewGameRequest(BaseModel):
     level: Literal["nyumon", "shokyuu", "chukyuu", "joukyuu"] = "nyumon"
-    mode: Literal["pvp", "ai"] = "pvp"
-    ai_difficulty: Optional[Literal["easy", "normal", "hard"]] = None
+    mode: Literal["pvp", "ai", "ai_vs_ai"] = "pvp"
+    ai_difficulty: Optional[Literal["easy", "normal", "hard"]] = None       # AI vs Human
+    ai_difficulty_black: Optional[Literal["easy", "normal", "hard"]] = None  # AI同士: 黒
+    ai_difficulty_white: Optional[Literal["easy", "normal", "hard"]] = None  # AI同士: 白
+    human_player: Optional[Literal["black", "white"]] = None                 # 人間が担当する陣（"black"=先手, "white"=後手）
 
 
 class MoveRequest(BaseModel):

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "軍議",
-  description: "HUNTER×HUNTERの思考型ボードゲーム「軍議」のWebアプリ",
+  title: "軍儀",
+  description: "HUNTER×HUNTERの思考型ボードゲーム「軍儀」のWebアプリ",
 };
 
 export default function RootLayout({

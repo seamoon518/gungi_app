@@ -1,7 +1,7 @@
 # フロントエンド 引継ぎ資料 — 謀（ぼう）寝返りUI実装
 
 ## プロジェクト概要
-- **アプリ名**: gungi_app（HUNTER×HUNTER「軍議」ボードゲームのWebアプリ）
+- **アプリ名**: gungi_app（HUNTER×HUNTER「軍儀」ボードゲームのWebアプリ）
 - **フロントエンド**: Next.js (App Router) / TypeScript / TailwindCSS
 - **バックエンド**: FastAPI（別セッションで並行開発中）
 - **デプロイ先**: Vercel（https://gungi-app.vercel.app）

@@ -7,7 +7,7 @@
 ## 📌 プロジェクト概要
 
 **アプリ名**: gungi_app  
-**説明**: HUNTER×HUNTERに登場する思考型ボードゲーム「軍議」のWebアプリ  
+**説明**: HUNTER×HUNTERに登場する思考型ボードゲーム「軍儀」のWebアプリ  
 **デプロイ**:
 - フロントエンド: https://gungi-app.vercel.app（Vercel）
 - バックエンド: https://gungiapp-production.up.railway.app（Railway）

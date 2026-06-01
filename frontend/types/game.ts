@@ -6,7 +6,7 @@ export type PieceType =
   | "砲" | "筒" | "弓" | "謀";
 
 export type GameLevel = "nyumon" | "shokyuu" | "chukyuu" | "joukyuu";
-export type GameMode = "pvp" | "ai";
+export type GameMode = "pvp" | "ai" | "ai_vs_ai";
 export type AiDifficulty = "easy" | "normal" | "hard";
 
 export interface Piece {
@@ -29,7 +29,9 @@ export interface GameState {
   level: GameLevel;
   phase: "setup" | "play";
   setup_done: Record<Player, boolean>;
-  ai_player: Player | null;
+  ai_player: Player | "both" | null;
+  ai_difficulty_black: AiDifficulty | null;
+  ai_difficulty_white: AiDifficulty | null;
   mode: GameMode;
   last_move: { from_row: number; from_col: number; to_row: number; to_col: number } | null;
 }

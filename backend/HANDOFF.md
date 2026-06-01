@@ -1,7 +1,7 @@
 # バックエンド 引継ぎ資料 — 謀（ぼう）寝返り実装
 
 ## プロジェクト概要
-- **アプリ名**: gungi_app（HUNTER×HUNTER「軍議」ボードゲームのWebアプリ）
+- **アプリ名**: gungi_app（HUNTER×HUNTER「軍儀」ボードゲームのWebアプリ）
 - **バックエンド**: Python / FastAPI
 - **フロントエンド**: Next.js（別セッションで並行開発中）
 - **デプロイ先**: Railway（https://gungiapp-production.up.railway.app）

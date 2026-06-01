@@ -26,7 +26,7 @@ _MAX_HAND = 10   # 1 種の駒種を手駒に持てる最大数（余裕をも�
 
 class ZobristHasher:
     """
-    軍議の局面を 64bit 整数にハッシュする。
+    軍儀の局面を 64bit 整数にハッシュする。
 
     テーブル構成:
       board_table[r][c][layer][piece_type_idx][owner_idx]  6,804 個

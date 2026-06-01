@@ -40,7 +40,8 @@ def get_ai_move_and_apply(state: GameState) -> Tuple[bool, str]:
     if state.game_over:
         return False, "ゲームは終了しています"
 
-    ai_player = state.ai_player
+    # AI同士モードでは手番側プレイヤーが AI として動く
+    ai_player = state.current_player if state.ai_player == "both" else state.ai_player
 
     if state.phase == "setup":
         return _handle_setup(state, ai_player)
@@ -91,7 +92,14 @@ def _handle_setup(state: GameState, ai_player: str) -> Tuple[bool, str]:
 
 def _handle_game(state: GameState, ai_player: str) -> Tuple[bool, str]:
     """ゲームフェーズ: alpha-beta 探索で最善手を選択"""
-    params = _DIFFICULTY_PARAMS.get(state.ai_difficulty or "easy", _DIFFICULTY_PARAMS["easy"])
+    # per-player 難易度（AI同士モード）→ fallback to ai_difficulty → "easy"
+    if ai_player == "black":
+        difficulty = state.ai_difficulty_black or state.ai_difficulty or "easy"
+    elif ai_player == "white":
+        difficulty = state.ai_difficulty_white or state.ai_difficulty or "easy"
+    else:
+        difficulty = state.ai_difficulty or "easy"
+    params = _DIFFICULTY_PARAMS.get(difficulty, _DIFFICULTY_PARAMS["easy"])
     max_depth = params["max_depth"]
     weights = load_weights(params.get("weights", "tier1"))
 

@@ -71,7 +71,7 @@ export default function GameInfo({
 }: Props) {
   const isActive = state.current_player === player;
   const isSetup = state.phase === "setup";
-  const isAiControlled = state.ai_player === player;
+  const isAiControlled = state.ai_player === player || state.ai_player === "both";
 
   const panel = (
     <div className="flex flex-col gap-2 p-3 bg-white rounded-xl shadow w-full lg:w-44">

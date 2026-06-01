@@ -1,6 +1,6 @@
 import {
   GameState, ValidMovesResponse, ValidArataResponse,
-  MoveAction, GameLevel, GameMode, AiDifficulty,
+  MoveAction, GameLevel, GameMode, AiDifficulty, Player,
 } from "@/types/game";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8002";
@@ -19,11 +19,21 @@ export const api = {
     level: GameLevel = "nyumon",
     mode: GameMode = "pvp",
     aiDifficulty?: AiDifficulty,
+    aiDifficultyBlack?: AiDifficulty,  // AI同士: 黒の難易度
+    aiDifficultyWhite?: AiDifficulty,  // AI同士: 白の難易度
+    humanPlayer?: Player,              // 人間が担当する陣（"black"=先手, "white"=後手）
   ): Promise<GameState> =>
     request("/game/new", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ level, mode, ai_difficulty: aiDifficulty ?? null }),
+      body: JSON.stringify({
+        level,
+        mode,
+        ai_difficulty: aiDifficulty ?? null,
+        ai_difficulty_black: aiDifficultyBlack ?? null,
+        ai_difficulty_white: aiDifficultyWhite ?? null,
+        human_player: humanPlayer ?? null,
+      }),
     }),
 
   getState: (gameId: string): Promise<GameState> =>

@@ -14,7 +14,10 @@ type Screen =
   | "mode_select"
   | "pvp_rule_select"
   | "ai_difficulty_select"
+  | "ai_player_select"     // AI vs Human: 先手/後手/ランダム選択
   | "ai_rule_select"
+  | "ai_vs_ai_setup"       // AI同士: 両側の強さを選ぶ画面
+  | "ai_vs_ai_rule_select" // AI同士: ルール選択
   | "game";
 
 interface PendingChoice {
@@ -47,6 +50,11 @@ export default function Home() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [gameMode, setGameMode] = useState<GameMode>("pvp");
   const [aiDifficulty, setAiDifficulty] = useState<AiDifficulty>("easy");
+  // AI同士モード用
+  const [aiDifficultyBlack, setAiDifficultyBlack] = useState<AiDifficulty>("easy");
+  const [aiDifficultyWhite, setAiDifficultyWhite] = useState<AiDifficulty>("easy");
+  // AI vs Human: 人間が担当する陣（"black"=先手, "white"=後手, "random"=ランダム）
+  const [humanPlayer, setHumanPlayer] = useState<Player | "random">("black");
 
   const [selectedCell, setSelectedCell] = useState<[number, number] | null>(null);
   const [highlights, setHighlights] = useState<[number, number][]>([]);
@@ -76,30 +84,56 @@ export default function Home() {
     setEnemyPreviewCell(null); setEnemyPreviewMoves([]);
   };
 
-  // AI の手番を自動トリガー
+  // AI の手番を自動トリガー（AI vs Human / AI vs AI 共通）
   const aiTriggeringRef = useRef(false);
   useEffect(() => {
     if (!gameState) return;
     if (gameState.game_over) return;
-    if (gameState.mode !== "ai") return;
+    if (gameState.mode !== "ai" && gameState.mode !== "ai_vs_ai") return;
     if (!gameState.ai_player) return;
-    if (gameState.current_player !== gameState.ai_player) return;
+
+    // AI vs Human: 手番が AI のときだけ動く
+    // AI vs AI: 常に動く（ai_player === "both"）
+    const isAiTurn =
+      gameState.ai_player === "both" ||
+      gameState.current_player === gameState.ai_player;
+    if (!isAiTurn) return;
     if (aiTriggeringRef.current) return;
 
     aiTriggeringRef.current = true;
+    // AI vs AI は視覚的なテンポを確保するため少し長めに待つ
+    const delay = gameState.mode === "ai_vs_ai" ? 600 : 400;
+
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
-        // セットアップフェーズで「済」宣言後はAIのターンが連続するため、ループで処理する
-        let currentState = gameState;
-        while (
-          currentState.current_player === currentState.ai_player &&
-          !currentState.game_over
-        ) {
-          const state = await api.aiMove(currentState.game_id);
-          setGameState(state);
-          clearAll();
-          currentState = state;
+        if (gameState.mode === "ai_vs_ai") {
+          // AI同士: 1手指して依存配列の変化で再トリガー。
+          // ただし setup フェーズで同じプレイヤーが連続して指す場合はループで続ける。
+          let currentState = gameState;
+          const startPlayer = currentState.current_player;
+          do {
+            const state = await api.aiMove(currentState.game_id);
+            setGameState(state);
+            clearAll();
+            currentState = state;
+          } while (
+            !currentState.game_over &&
+            currentState.phase === "setup" &&
+            currentState.current_player === startPlayer
+          );
+        } else {
+          // AI vs Human: セットアップで連続手番が続く場合はループで処理
+          let currentState = gameState;
+          while (
+            currentState.current_player === currentState.ai_player &&
+            !currentState.game_over
+          ) {
+            const state = await api.aiMove(currentState.game_id);
+            setGameState(state);
+            clearAll();
+            currentState = state;
+          }
         }
       } catch (e) {
         setError(String(e));
@@ -107,7 +141,7 @@ export default function Home() {
         setLoading(false);
         aiTriggeringRef.current = false;
       }
-    }, 400);  // 少し待ってから思考（UX向上）
+    }, delay);
 
     return () => {
       clearTimeout(timer);
@@ -118,11 +152,26 @@ export default function Home() {
   const handleSelectLevel = useCallback(async (level: GameLevel) => {
     setLoading(true); setError(null);
     try {
-      const state = await api.newGame(level, gameMode, gameMode === "ai" ? aiDifficulty : undefined);
+      // "random" の場合はここで解決する
+      const resolvedHumanPlayer: Player | undefined =
+        gameMode === "ai"
+          ? humanPlayer === "random"
+            ? (Math.random() < 0.5 ? "black" : "white")
+            : humanPlayer
+          : undefined;
+
+      const state = await api.newGame(
+        level,
+        gameMode,
+        gameMode === "ai" ? aiDifficulty : undefined,
+        gameMode === "ai_vs_ai" ? aiDifficultyBlack : undefined,
+        gameMode === "ai_vs_ai" ? aiDifficultyWhite : undefined,
+        resolvedHumanPlayer,
+      );
       setGameState(state); clearAll(); setScreen("game");
     } catch (e) { setError(String(e)); }
     finally { setLoading(false); }
-  }, [gameMode, aiDifficulty]);
+  }, [gameMode, aiDifficulty, aiDifficultyBlack, aiDifficultyWhite, humanPlayer]);
 
   const handleResign = useCallback(async () => {
     if (!gameState) return;
@@ -213,6 +262,7 @@ export default function Home() {
 
   const handleHandPieceClick = useCallback(async (type: PieceType) => {
     if (!gameState || loading) return;
+    if (gameState.mode === "ai_vs_ai") return; // 観戦モードは操作不可
     setError(null);
     if (selectedHandPiece === type) {
       setSelectedHandPiece(null); setArataHighlights([]); return;
@@ -236,6 +286,7 @@ export default function Home() {
 
   const handleCellClick = useCallback(async (row: number, col: number) => {
     if (!gameState || gameState.game_over || loading) return;
+    if (gameState.mode === "ai_vs_ai") return; // 観戦モードはクリック無効
     setError(null);
 
     if (gizokuMode) {
@@ -329,6 +380,10 @@ export default function Home() {
     return cells;
   })();
 
+  // 人間が後手（白）のとき盤を 180° 反転する
+  // ai_player === "black" = AI が先手 = 人間が後手
+  const boardFlipped = gameState?.mode === "ai" && gameState?.ai_player === "black";
+
   const homeBtn = (
     <button
       onClick={() => setShowHomeConfirm(true)}
@@ -369,7 +424,7 @@ export default function Home() {
   const renderRuleSelect = (backScreen: Screen) => (
     <>
     <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-5 p-4 overflow-x-hidden w-full">
-      <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍議</h1>
+      <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍儀</h1>
       <p className="text-lg text-gray-600">どのルールで遊びますか？</p>
       <div className="flex flex-col gap-3 w-full max-w-md">
         {LEVEL_INFO.map(({ key, label, placement, special, tsuke, suiTsuke }) => (
@@ -403,7 +458,7 @@ export default function Home() {
   if (screen === "title") {
     return (
       <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4 w-full">
-        <h1 className="text-4xl sm:text-5xl font-bold tracking-widest text-gray-800">軍議 <span className="text-lg font-normal text-gray-400">ver 1</span></h1>
+        <h1 className="text-4xl sm:text-5xl font-bold tracking-widest text-gray-800">軍儀 <span className="text-lg font-normal text-gray-400">ver 2</span></h1>
         <p className="text-gray-500 text-sm">HUNTER×HUNTER の思考型ボードゲーム</p>
         <button
           onClick={() => setScreen("mode_select")}
@@ -419,7 +474,7 @@ export default function Home() {
     return (
       <>
       <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4 overflow-x-hidden w-full">
-        <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍議</h1>
+        <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍儀</h1>
         <p className="text-lg text-gray-600">対戦モードを選択してください</p>
         <div className="flex flex-col gap-4 w-full max-w-xs">
           <button
@@ -436,6 +491,13 @@ export default function Home() {
             <span className="text-lg font-bold text-amber-700">AIと対戦</span>
             <span className="text-xs text-gray-500 mt-1">コンピューターと対戦します（α版）</span>
           </button>
+          <button
+            onClick={() => { setGameMode("ai_vs_ai"); setScreen("ai_vs_ai_setup"); }}
+            className="flex flex-col items-start px-6 py-5 bg-white border-2 border-purple-500 rounded-xl hover:bg-purple-50 transition shadow"
+          >
+            <span className="text-lg font-bold text-purple-700">AI同士対戦（観戦）</span>
+            <span className="text-xs text-gray-500 mt-1">AI同士の対局を観戦します</span>
+          </button>
         </div>
       </main>
       {homeBtn}{homeConfirmModal}
@@ -445,17 +507,85 @@ export default function Home() {
 
   if (screen === "pvp_rule_select") return renderRuleSelect("mode_select");
 
+  // ── AI同士: 強さ設定画面 ────────────────────────────────────────────────────
+  if (screen === "ai_vs_ai_setup") {
+    const DIFF_OPTIONS: { key: AiDifficulty; label: string; desc: string }[] = [
+      { key: "easy",   label: "簡単",   desc: "弱め" },
+      { key: "normal", label: "普通",   desc: "中程度" },
+      { key: "hard",   label: "難しい", desc: "強め" },
+    ];
+    return (
+      <>
+      <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-6 p-4 overflow-x-hidden w-full">
+        <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍儀</h1>
+        <p className="text-lg text-gray-600">AI同士の強さを設定してください</p>
+
+        <div className="flex flex-col sm:flex-row gap-6 w-full max-w-lg">
+          {/* 黒陣（先手） */}
+          <div className="flex-1 bg-white rounded-xl border-2 border-gray-300 p-4 flex flex-col gap-3">
+            <p className="text-center font-bold text-gray-800">黒陣（先手）</p>
+            {DIFF_OPTIONS.map(({ key, label, desc }) => (
+              <button
+                key={key}
+                onClick={() => setAiDifficultyBlack(key)}
+                className={`w-full py-2.5 rounded-lg text-sm font-bold border-2 transition ${
+                  aiDifficultyBlack === key
+                    ? "bg-gray-900 text-white border-gray-900"
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                {label}
+                <span className="ml-1 text-xs font-normal opacity-60">（{desc}）</span>
+              </button>
+            ))}
+          </div>
+
+          {/* 白陣（後手） */}
+          <div className="flex-1 bg-white rounded-xl border-2 border-gray-300 p-4 flex flex-col gap-3">
+            <p className="text-center font-bold text-gray-800">白陣（後手）</p>
+            {DIFF_OPTIONS.map(({ key, label, desc }) => (
+              <button
+                key={key}
+                onClick={() => setAiDifficultyWhite(key)}
+                className={`w-full py-2.5 rounded-lg text-sm font-bold border-2 transition ${
+                  aiDifficultyWhite === key
+                    ? "bg-white text-gray-900 border-gray-900 shadow"
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                {label}
+                <span className="ml-1 text-xs font-normal opacity-60">（{desc}）</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button
+          onClick={() => setScreen("ai_vs_ai_rule_select")}
+          className="px-10 py-3 bg-purple-600 text-white text-base font-bold rounded-xl hover:bg-purple-700 transition shadow-lg"
+        >
+          次へ → ルール選択
+        </button>
+        <button onClick={() => setScreen("mode_select")} className="text-sm text-gray-400 hover:text-gray-600 underline">← 戻る</button>
+      </main>
+      {homeBtn}{homeConfirmModal}
+      </>
+    );
+  }
+
+  if (screen === "ai_vs_ai_rule_select") return renderRuleSelect("ai_vs_ai_setup");
+
   if (screen === "ai_difficulty_select") {
     return (
       <>
       <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4 overflow-x-hidden w-full">
-        <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍議</h1>
+        <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍儀</h1>
         <p className="text-lg text-gray-600">誰と対戦しますか？</p>
         <div className="flex flex-col gap-4 w-full max-w-xs">
           {(["easy", "normal", "hard"] as AiDifficulty[]).map((diff) => {
             const label = diff === "easy" ? "簡単" : diff === "normal" ? "普通" : "難しい";
             return (
-              <button key={diff} onClick={() => { setAiDifficulty(diff); setScreen("ai_rule_select"); }}
+              <button key={diff} onClick={() => { setAiDifficulty(diff); setScreen("ai_player_select"); }}
                 className="px-6 py-4 bg-white border-2 border-amber-500 rounded-xl hover:bg-amber-50 transition shadow font-bold text-amber-700 text-lg">
                 {label}
               </button>
@@ -469,13 +599,64 @@ export default function Home() {
     );
   }
 
-  if (screen === "ai_rule_select") return renderRuleSelect("ai_difficulty_select");
+  // ── AI vs Human: 先手/後手/ランダム 選択画面 ──────────────────────────────────
+  if (screen === "ai_player_select") {
+    const OPTIONS: { value: Player | "random"; label: string; sub: string; bg: string; border: string; text: string }[] = [
+      {
+        value: "black",
+        label: "先手（黒陣）",
+        sub: "あなたが最初に動きます",
+        bg: "bg-gray-900", border: "border-gray-900", text: "text-white",
+      },
+      {
+        value: "white",
+        label: "後手（白陣）",
+        sub: "AIが先に動きます",
+        bg: "bg-white", border: "border-gray-400", text: "text-gray-900",
+      },
+      {
+        value: "random",
+        label: "ランダム",
+        sub: "先手・後手をランダムで決定",
+        bg: "bg-gradient-to-r from-gray-900 to-white", border: "border-amber-400", text: "text-amber-700",
+      },
+    ];
+    return (
+      <>
+      <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-6 p-4 overflow-x-hidden w-full">
+        <h1 className="text-3xl font-bold tracking-widest text-gray-800">軍儀</h1>
+        <p className="text-lg text-gray-600">先手・後手を選んでください</p>
+        <div className="flex flex-col gap-4 w-full max-w-xs">
+          {OPTIONS.map(({ value, label, sub, bg, border, text }) => (
+            <button
+              key={value}
+              onClick={() => { setHumanPlayer(value); setScreen("ai_rule_select"); }}
+              className={`
+                flex flex-col items-start px-6 py-5 rounded-xl border-2 shadow transition
+                hover:brightness-95
+                ${humanPlayer === value ? "ring-4 ring-blue-400 scale-[1.02]" : ""}
+                ${bg} ${border}
+              `}
+            >
+              <span className={`text-lg font-bold ${text}`}>{label}</span>
+              <span className="text-xs text-gray-400 mt-1">{sub}</span>
+            </button>
+          ))}
+        </div>
+        <button onClick={() => setScreen("ai_difficulty_select")} className="text-sm text-gray-400 hover:text-gray-600 underline">← 戻る</button>
+      </main>
+      {homeBtn}{homeConfirmModal}
+      </>
+    );
+  }
+
+  if (screen === "ai_rule_select") return renderRuleSelect("ai_player_select");
 
   // ─── ゲーム画面 ─────────────────────────────────────────────────────
   return (
     <>
     <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center p-2 sm:p-4 gap-3 overflow-x-hidden w-full">
-      <h1 className="text-xl sm:text-2xl font-bold tracking-widest text-gray-800">軍議</h1>
+      <h1 className="text-xl sm:text-2xl font-bold tracking-widest text-gray-800">軍儀</h1>
 
       {gameState && (
         <>
@@ -487,6 +668,16 @@ export default function Home() {
                 ? <p className="text-sm mt-1"><span className="font-semibold">{gameState.winner === "black" ? "黒陣" : "白陣"}</span> の勝利！</p>
                 : <p className="text-sm mt-1">千日手（引き分け）</p>
               }
+            </div>
+          )}
+
+          {/* AI同士: 観戦バナー */}
+          {gameState.mode === "ai_vs_ai" && !gameState.game_over && (
+            <div className="bg-purple-50 border-2 border-purple-300 rounded-xl px-4 py-2 text-sm text-purple-700 font-medium text-center w-full">
+              🤖 AI同士対戦 観戦中
+              <span className="ml-3 text-xs text-purple-500 font-normal">
+                黒: {gameState.ai_difficulty_black ?? "?"}　白: {gameState.ai_difficulty_white ?? "?"}
+              </span>
             </div>
           )}
 
@@ -511,59 +702,78 @@ export default function Home() {
           )}
 
           {/*
-            レイアウト:
-            ・スマホ（縦）: 白パネル → ボード(zoom縮小) → 黒パネル（全幅）
-            ・PC（横）:     白パネル(左,回転) | ボード | 黒パネル(右)
+            レイアウト（boardFlipped = 人間が後手のとき）:
+            ・通常（先手/PvP）: 白パネル → ボード → 黒パネル
+            ・反転（後手）:     黒パネル → ボード(反転) → 白パネル
+              mobile 縦: 相手パネル(上) → ボード → 自分パネル(下)
+              PC 横:     相手パネル(左) | ボード(反転) | 自分パネル(右)
           */}
-          <div className="flex flex-col lg:flex-row items-stretch lg:items-start gap-3 w-full max-w-screen-xl">
+          {(() => {
+            const gizokuReset = () => { setGizokuMode(v => !v); setSelectedCell(null); setHighlights([]); setEnemyTsukeMoves([]); setSelectedHandPiece(null); setArataHighlights([]); setInspectStack(null); };
 
-            {/* 白陣パネル（180°回転） */}
-            <GameInfo
-              state={gameState}
-              player="white"
-              flipped={true}
-              selectedHandPiece={gameState.current_player === "white" ? selectedHandPiece : null}
-              gizokuMode={gizokuMode}
-              onHandPieceClick={handleHandPieceClick}
-              onGizokuToggle={() => { setGizokuMode(v => !v); setSelectedCell(null); setHighlights([]); setEnemyTsukeMoves([]); setSelectedHandPiece(null); setArataHighlights([]); setInspectStack(null); }}
-              onResign={handleResign}
-              onSetupDone={handleSetupDone}
-              onUndo={handleUndo}
-              error={gameState.current_player === "white" ? error : null}
-            />
-
-            {/* ボード（セル自体がレスポンシブサイズ） */}
-            <div className="flex justify-center items-start w-full lg:w-auto">
-              <Board
+            const whitePanel = (
+              <GameInfo
                 state={gameState}
-                selectedCell={selectedCell}
-                highlights={highlights}
-                enemyTsukeMoves={enemyTsukeMoves}
-                arataHighlights={arataHighlights}
-                lastMoveHighlights={lastMoveHighlights}
+                player="white"
+                flipped={!boardFlipped}  // PvP/先手時は lg:rotate-180、後手時は不要
+                selectedHandPiece={gameState.current_player === "white" ? selectedHandPiece : null}
                 gizokuMode={gizokuMode}
-                onCellClick={handleCellClick}
-                onCellLongPress={handleCellLongPress}
-                enemyPreviewCell={enemyPreviewCell}
-                enemyPreviewMoves={enemyPreviewMoves}
+                onHandPieceClick={handleHandPieceClick}
+                onGizokuToggle={gizokuReset}
+                onResign={handleResign}
+                onSetupDone={handleSetupDone}
+                onUndo={handleUndo}
+                error={gameState.current_player === "white" ? error : null}
               />
-            </div>
+            );
 
-            {/* 黒陣パネル（通常） */}
-            <GameInfo
-              state={gameState}
-              player="black"
-              flipped={false}
-              selectedHandPiece={gameState.current_player === "black" ? selectedHandPiece : null}
-              gizokuMode={gizokuMode}
-              onHandPieceClick={handleHandPieceClick}
-              onGizokuToggle={() => { setGizokuMode(v => !v); setSelectedCell(null); setHighlights([]); setEnemyTsukeMoves([]); setSelectedHandPiece(null); setArataHighlights([]); setInspectStack(null); }}
-              onResign={handleResign}
-              onSetupDone={handleSetupDone}
-              onUndo={handleUndo}
-              error={gameState.current_player === "black" ? error : null}
-            />
-          </div>
+            const blackPanel = (
+              <GameInfo
+                state={gameState}
+                player="black"
+                flipped={false}
+                selectedHandPiece={gameState.current_player === "black" ? selectedHandPiece : null}
+                gizokuMode={gizokuMode}
+                onHandPieceClick={handleHandPieceClick}
+                onGizokuToggle={gizokuReset}
+                onResign={handleResign}
+                onSetupDone={handleSetupDone}
+                onUndo={handleUndo}
+                error={gameState.current_player === "black" ? error : null}
+              />
+            );
+
+            const boardEl = (
+              <div className="flex justify-center items-start w-full lg:w-auto">
+                <Board
+                  state={gameState}
+                  selectedCell={selectedCell}
+                  highlights={highlights}
+                  enemyTsukeMoves={enemyTsukeMoves}
+                  arataHighlights={arataHighlights}
+                  lastMoveHighlights={lastMoveHighlights}
+                  gizokuMode={gizokuMode}
+                  onCellClick={handleCellClick}
+                  onCellLongPress={handleCellLongPress}
+                  enemyPreviewCell={enemyPreviewCell}
+                  enemyPreviewMoves={enemyPreviewMoves}
+                  flipped={boardFlipped}
+                />
+              </div>
+            );
+
+            return (
+              <div className="flex flex-col lg:flex-row items-stretch lg:items-start gap-3 w-full max-w-screen-xl">
+                {boardFlipped ? (
+                  // 後手（白）視点: 相手(黒)パネルが上/左、自分(白)パネルが下/右
+                  <>{blackPanel}{boardEl}{whitePanel}</>
+                ) : (
+                  // 先手（黒）視点 / PvP: 白パネルが上/左、黒パネルが下/右
+                  <>{whitePanel}{boardEl}{blackPanel}</>
+                )}
+              </div>
+            );
+          })()}
         </>
       )}
 

@@ -177,7 +177,7 @@ def run_benchmark(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="軍議 AI ベンチマーク")
+    parser = argparse.ArgumentParser(description="軍儀 AI ベンチマーク")
     parser.add_argument("--baseline",    default="tier0")
     parser.add_argument("--candidate",   default="tier1")
     parser.add_argument("--games",       type=int,   default=100)

@@ -170,10 +170,22 @@ def create_initial_state(
     level: str = "nyumon",
     mode: str = "pvp",
     ai_difficulty: Optional[str] = None,
+    ai_difficulty_black: Optional[str] = None,
+    ai_difficulty_white: Optional[str] = None,
+    human_player: Optional[str] = None,
 ) -> GameState:
     rules = RULES_BY_LEVEL.get(level, GameRules())
-    # AI対戦: AI は後手（白）、人間は先手（黒）
-    ai_player = "white" if mode == "ai" else None
+
+    # AI担当プレイヤーの決定
+    if mode == "ai":
+        if human_player == "white":
+            ai_player = "black"   # 人間=後手(白), AI=先手(黒)
+        else:
+            ai_player = "white"   # デフォルト: 人間=先手(黒), AI=後手(白)
+    elif mode == "ai_vs_ai":
+        ai_player = "both"        # 両側AI
+    else:
+        ai_player = None
 
     if level == "shokyuu":
         state = _create_fixed_state(
@@ -188,6 +200,8 @@ def create_initial_state(
             _NYUMON_WHITE_LAYOUT, _NYUMON_BLACK_LAYOUT, _NYUMON_HAND_TYPES,
         )
     state.ai_player = ai_player
+    state.ai_difficulty_black = ai_difficulty_black
+    state.ai_difficulty_white = ai_difficulty_white
     return state
 
 

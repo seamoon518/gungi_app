@@ -25,7 +25,11 @@ _games: Dict[str, GameState] = {}
 @router.post("/new")
 def new_game(req: NewGameRequest):
     game_id = str(uuid.uuid4())
-    _games[game_id] = create_initial_state(req.level, req.mode, req.ai_difficulty)
+    _games[game_id] = create_initial_state(
+        req.level, req.mode, req.ai_difficulty,
+        req.ai_difficulty_black, req.ai_difficulty_white,
+        req.human_player,
+    )
     return _games[game_id].to_dict(game_id)
 
 
@@ -126,13 +130,14 @@ def setup_done(game_id: str):
 
 @router.post("/{game_id}/ai-move")
 def ai_move(game_id: str):
-    """AI の手番を処理する（setup / play 両フェーズ対応）"""
+    """AI の手番を処理する（setup / play 両フェーズ対応、AI同士モードにも対応）"""
     state = _get_or_404(game_id)
-    if state.mode != "ai":
+    if state.mode not in ("ai", "ai_vs_ai"):
         raise HTTPException(status_code=400, detail="AI対戦モードではありません。")
     if state.game_over:
         raise HTTPException(status_code=400, detail="ゲームは終了しています。")
-    if state.current_player != state.ai_player:
+    # AI同士の場合は常に手番側がAIなので手番チェック不要
+    if state.ai_player != "both" and state.current_player != state.ai_player:
         raise HTTPException(status_code=400, detail="AI の手番ではありません。")
     success, error = get_ai_move_and_apply(state)
     if not success:
