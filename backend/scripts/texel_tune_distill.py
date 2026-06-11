@@ -241,9 +241,10 @@ def tune_spsa(
     # SPSA ハイパーパラメータ
     alpha = 0.602
     gamma = 0.101
-    A = 100  # 50→100: 学習率の減衰を緩やかに
+    A = 100
 
-    # 自動学習率調整: 正規化損失スケールで最初のステップが 5% 程度になるよう設定
+    # 自動学習率調整: k=1時の a_k が ~0.05 になるよう設定（正規化損失スケール用）
+    # avg_g は n パラメータの平均勾配なので、実際の g_hat_i はより大きい → 上限を 2.0 に絞る
     print("[spsa] 学習率を自動調整中...", flush=True)
     trial_delta = [random.choice([-1, 1]) for _ in range(n)]
     c_trial = 0.1
@@ -252,15 +253,19 @@ def tune_spsa(
     Lp_trial = _batch_loss(tp)
     Lm_trial = _batch_loss(tm)
     avg_g = abs(Lp_trial - Lm_trial) / (2.0 * c_trial * n + 1e-9)
-    target_step = 0.05  # 正規化後スケール用（0.02→0.05）
-    a = max(1e-4, min(target_step * (A + 1) ** alpha / (avg_g + 1e-9), 200.0))
+    target_step = 0.05
+    a = max(1e-4, min(target_step * (A + 1) ** alpha / (avg_g + 1e-9), 2.0))  # 200→2.0 に変更
     c = 0.1
-    print(f"[spsa] a={a:.5f}  c={c}  avg_grad={avg_g:.6f}", flush=True)
+    max_step = 0.02  # 1ステップでパラメータが動く最大量（正規化空間）
+    print(f"[spsa] a={a:.5f}  c={c}  avg_grad={avg_g:.6f}  max_step={max_step}", flush=True)
     print(f"[spsa] 初期損失 = {compute_loss(positions[:batch_size], weights):.2f}", flush=True)
+
+    # 定期チェック用サブセット（全件評価によるハングを防ぐ）
+    eval_subset = random.sample(positions, min(10000, len(positions)))
 
     theta = list(theta_init)
     best_theta = list(theta)
-    best_loss = compute_loss(positions, weights)
+    best_loss = compute_loss(eval_subset, weights)
     iteration = 0
     last_check = time.time()
 
@@ -276,14 +281,15 @@ def tune_spsa(
         Lp = _batch_loss(theta_p)
         Lm = _batch_loss(theta_m)
 
-        # 勾配推定 → パラメータ更新
+        # 勾配推定 → パラメータ更新（勾配クリッピングで大きすぎる更新を防ぐ）
         for i in range(n):
             g_hat = (Lp - Lm) / (2.0 * c_k * delta[i] + 1e-12)
-            theta[i] = _clamp(theta[i] - a_k * g_hat, 0.0, 1.0)
+            update = _clamp(a_k * g_hat, -max_step, max_step)
+            theta[i] = _clamp(theta[i] - update, 0.0, 1.0)
 
-        # 50イテレーションごと or 5分ごとに全データで損失確認
+        # 50イテレーションごと or 5分ごとにサブセットで損失確認
         if iteration % 50 == 0 or time.time() - last_check > 300:
-            full_loss = compute_loss(positions, _from_norm(theta))
+            full_loss = compute_loss(eval_subset, _from_norm(theta))
             elapsed   = (time.time() - start) / 3600
             remaining = max(0.0, deadline - time.time()) / 3600
             print(f"  iter={iteration:4d}  loss={full_loss:.2f}  a_k={a_k:.5f}"
