@@ -386,9 +386,40 @@ def pvs(
     if game_count + path_count >= 3:
         return 0
 
-    # 探索パスカウンタに現局面を登録（バックトラック時に -1）
-    if search_path_counter is not None:
-        search_path_counter[key] += 1
+    args = (state, key, ai_player, depth, alpha, beta, start_time, time_limit, max_moves,
+            tt, killers, history, weights, null_move_allowed, position_counter, search_path_counter)
+    if search_path_counter is None:
+        return _pvs_node(*args)
+
+    # 探索パスカウンタに現局面を登録し、抜けるとき（途中の return・時間切れ例外を含む）に必ず -1 する。
+    # -1 し忘れると探索中に同じ局面を3回見ただけで千日手(0点)扱いになり、
+    # 「帥を取れる手」まで 0 点に化けて AI が明白な勝ちを逃していた。
+    search_path_counter[key] += 1
+    try:
+        return _pvs_node(*args)
+    finally:
+        search_path_counter[key] -= 1
+
+
+def _pvs_node(
+    state: GameState,
+    key: int,
+    ai_player: str,
+    depth: int,
+    alpha: float,
+    beta: float,
+    start_time: float,
+    time_limit: float,
+    max_moves: int,
+    tt: TranspositionTable,
+    killers: KillerMoves,
+    history: HistoryTable,
+    weights: Optional[dict],
+    null_move_allowed: bool,
+    position_counter: Optional[Counter],
+    search_path_counter: Optional[Counter],
+) -> float:
+    """pvs 本体（千日手チェックと探索パスカウンタの管理は pvs 側で行う）。"""
 
     # ── TT lookup ────────────────────────────────────────────────────────────
     entry = tt.lookup(key)
@@ -535,10 +566,6 @@ def pvs(
                 else TT_EXACT)
         tt.store(key, depth, best_score, flag, best_move)
 
-    # バックトラック: この局面をパスカウンタから除去
-    if search_path_counter is not None:
-        search_path_counter[key] -= 1
-
     fallback = evaluate(state, ai_player, weights)
     if maximizing:
         return best_score if best_score > -inf else fallback
@@ -556,11 +583,13 @@ def find_best_move(
     max_moves: int = 25,
     weights: Optional[dict] = None,
     return_score: bool = False,
+    info: Optional[dict] = None,
 ) -> Optional[tuple]:
     """
     反復深化 + PVS + Aspiration Window で最善手を返す。
     時間切れ時は直前の深さの結果を使用。
     return_score=True のとき (best_move, prev_score) を返す（蒸留学習用）。
+    info に dict を渡すと、完了した探索深さなどの統計を書き込む（診断用）。
     """
     moves = get_all_game_moves(state, ai_player)
     if not moves:
@@ -646,12 +675,15 @@ def find_best_move(
 
         if scored_this_depth is None:
             break  # このdepthは完了しなかった
+        if info is not None:
+            info["depth"] = depth
 
         # best_move を更新
         scored_this_depth.sort(key=lambda x: x[0], reverse=True)
         top_score = scored_this_depth[0][0]
 
-        if noise > 0:
+        if noise > 0 and top_score < 90_000:
+            # 勝ちが見えているとき（top_score >= 90000）はノイズで手を散らさず最短の勝ちを選ぶ
             candidates = [m for s, m in scored_this_depth if s >= top_score - noise]
             best_move = random.choice(candidates)
         else:
@@ -661,6 +693,10 @@ def find_best_move(
         if best_move in moves:
             moves = [best_move] + [m for m in moves if m != best_move]
 
+    if info is not None:
+        info.setdefault("depth", 0)
+        info["root_moves"] = len(moves)
+        info["score"] = prev_score
     if return_score:
         return (best_move, prev_score) if best_move is not None else None
     return best_move

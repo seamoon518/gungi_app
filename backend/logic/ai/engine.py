@@ -117,6 +117,7 @@ def _handle_game(state: GameState, ai_player: str) -> Tuple[bool, str]:
         # 合法手なし（帅以外の駒が全滅など）→ AI投了
         state.game_over = True
         state.winner = "black" if ai_player == "white" else "white"
+        state.end_reason = "no_moves"
         return True, ""
 
     if best[0] == "board":

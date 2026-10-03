@@ -20,7 +20,9 @@ import copy
 from typing import List, Tuple, Optional
 
 from models.piece import Piece, PieceType
-from models.game_state import GameState, Move, GameRules, RULES_BY_LEVEL, MAX_UNDO_SNAPSHOTS
+from models.game_state import (
+    GameState, Move, GameRules, RULES_BY_LEVEL, MAX_UNDO_SNAPSHOTS, MAX_PLIES_AI_VS_AI,
+)
 from logic.movement import get_valid_moves
 from logic.arata import get_valid_arata_positions
 from logic.setup import get_valid_setup_positions, has_placed_sui
@@ -221,6 +223,7 @@ def _finish_turn(state: GameState, player: str) -> Tuple[bool, str]:
     if winner:
         state.game_over = True
         state.winner = winner
+        state.end_reason = "sui"
         return True, ""
 
     # 手番を先に切り替えてからハッシュを計算する。
@@ -231,7 +234,13 @@ def _finish_turn(state: GameState, player: str) -> Tuple[bool, str]:
     if check_sennichite(state.position_history, h):
         state.game_over = True
         state.winner = None
+        state.end_reason = "sennichite"
         return True, ""
+
+    if state.mode == "ai_vs_ai" and len(state.move_history) >= MAX_PLIES_AI_VS_AI:
+        state.game_over = True
+        state.winner = None
+        state.end_reason = "move_limit"
 
     return True, ""
 
@@ -246,7 +255,6 @@ def apply_move(
         return False, "Game is already over."
     if state.phase != "play":
         return False, "初期配置フェーズ中は駒を動かせません。"
-    _save_snapshot(state)
 
     src_stack = state.board[from_row][from_col]
     if not src_stack:
@@ -266,6 +274,8 @@ def apply_move(
     if action == "tsuke_enemy" and (to_row, to_col) not in options.enemy_tsuke_moves:
         return False, "Cannot tsuke that enemy square."
 
+    # 失敗した操作で「待った」の記録が増えないよう、検証が済んでから保存する
+    _save_snapshot(state)
     new_board = copy.deepcopy(state.board)
     moving_piece = new_board[from_row][from_col][-1]
     player = state.current_player
@@ -295,7 +305,6 @@ def apply_arata(
         return False, "Game is already over."
     if state.phase != "play":
         return False, "初期配置フェーズ中は新を使えません。"
-    _save_snapshot(state)
 
     player = state.current_player
 
@@ -313,6 +322,7 @@ def apply_arata(
     if (to_row, to_col) not in valid:
         return False, "Invalid arata position."
 
+    _save_snapshot(state)
     piece = hand.pop(hand_idx)
 
     new_board = copy.deepcopy(state.board)
@@ -338,7 +348,6 @@ def apply_boushou(
         return False, "Game is already over."
     if state.phase != "play":
         return False, "Not in play phase."
-    _save_snapshot(state)
 
     # 移動元の駒が謀であることを確認
     src_stack = state.board[from_row][from_col]
@@ -378,6 +387,7 @@ def apply_boushou(
         return False, "No matching hand piece for boushou."
 
     # 実行
+    _save_snapshot(state)
     new_board = copy.deepcopy(state.board)
     new_hand = {k: list(v) for k, v in state.hand_pieces.items()}
 
@@ -411,7 +421,6 @@ def apply_setup_place(
     """Place a piece during the setup phase (中級/上級)."""
     if state.phase != "setup":
         return False, "初期配置フェーズではありません。"
-    _save_snapshot(state)
 
     player = state.current_player
 
@@ -433,6 +442,7 @@ def apply_setup_place(
     if (to_row, to_col) not in valid:
         return False, "自陣（3列目まで）にのみ配置できます。"
 
+    _save_snapshot(state)
     piece = hand.pop(hand_idx)
     new_board = copy.deepcopy(state.board)
     new_board[to_row][to_col].append(piece)
@@ -451,13 +461,13 @@ def apply_setup_done(state: GameState) -> Tuple[bool, str]:
     """Declare 済 during setup phase."""
     if state.phase != "setup":
         return False, "初期配置フェーズではありません。"
-    _save_snapshot(state)
 
     player = state.current_player
 
     if not has_placed_sui(state.board, player):
         return False, "帥を配置してから済を宣言してください。"
 
+    _save_snapshot(state)
     state.setup_done[player] = True
 
     if player == "white":
