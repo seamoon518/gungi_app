@@ -1,7 +1,7 @@
 "use client";
 
-import { GameState, Player } from "@/types/game";
-import Cell from "./Cell";
+import { GameState } from "@/types/game";
+import Cell, { CELL_W } from "./Cell";
 
 interface Props {
   state: GameState;
@@ -36,11 +36,12 @@ export default function Board({
   const labelClass = flipped ? "rotate-180" : "";
 
   return (
-    <div className={containerClass}>
+    <div className={containerClass} data-testid="board">
       <div className="flex">
-        <div className="w-6" />
+        {/* 左上の空き: 下の段番号列（w-5 lg:w-6）と同じ幅にして列番号をマスに揃える */}
+        <div className="w-5 lg:w-6" />
         {Array.from({ length: 9 }, (_, c) => (
-          <div key={c} className={`w-9 sm:w-11 lg:w-14 text-center text-[9px] sm:text-[10px] lg:text-xs text-gray-500 mb-1 ${labelClass}`}>
+          <div key={c} data-col-label={c} className={`${CELL_W} text-center text-[9px] sm:text-[10px] lg:text-xs text-gray-500 mb-1 ${labelClass}`}>
             {c + 1}
           </div>
         ))}

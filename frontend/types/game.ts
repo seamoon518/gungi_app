@@ -34,6 +34,8 @@ export interface GameState {
   ai_difficulty_white: AiDifficulty | null;
   mode: GameMode;
   last_move: { from_row: number; from_col: number; to_row: number; to_col: number } | null;
+  // 終局理由: 帥を取った / 投了 / 千日手 / 手数上限（AI同士） / 合法手なし
+  end_reason?: "sui" | "resign" | "sennichite" | "move_limit" | "no_moves" | null;
 }
 
 export interface ValidMovesResponse {

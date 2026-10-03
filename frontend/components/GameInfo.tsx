@@ -19,11 +19,12 @@ interface Props {
 const PLAYER_LABEL: Record<Player, string> = { black: "黒陣", white: "白陣" };
 
 function HandPieces({
-  pieces, player, currentPlayer, selectedHandPiece, onHandPieceClick,
+  pieces, player, currentPlayer, interactive, selectedHandPiece, onHandPieceClick,
 }: {
   pieces: Piece[];
   player: Player;
   currentPlayer: Player;
+  interactive: boolean;        // false → AI 側・終局後など、押せない手駒
   selectedHandPiece: PieceType | null;
   onHandPieceClick: (type: PieceType) => void;
 }) {
@@ -33,21 +34,23 @@ function HandPieces({
   for (const p of pieces) grouped[p.type] = (grouped[p.type] ?? 0) + 1;
 
   const isActive = player === currentPlayer;
+  const clickable = isActive && interactive;
 
   return (
     <div className="flex flex-wrap gap-1 mt-1">
       {Object.entries(grouped).map(([type, count]) => {
-        const isSelected = isActive && selectedHandPiece === type;
+        const isSelected = clickable && selectedHandPiece === type;
         return (
           <button
             key={type}
-            onClick={() => isActive && onHandPieceClick(type as PieceType)}
+            onClick={() => clickable && onHandPieceClick(type as PieceType)}
             className={`
               relative inline-flex items-center justify-center
               w-9 h-9 rounded-full border-2 text-xs font-bold transition-all
               ${player === "black" ? "bg-gray-900 text-white border-gray-700" : "bg-white text-gray-900 border-gray-400"}
               ${isSelected ? "ring-4 ring-yellow-400 scale-110" : ""}
-              ${isActive ? "cursor-pointer hover:scale-105" : "opacity-50 cursor-default"}
+              ${isActive ? "" : "opacity-50"}
+              ${clickable ? "cursor-pointer hover:scale-105" : "cursor-default"}
             `}
           >
             {type}
@@ -74,7 +77,7 @@ export default function GameInfo({
   const isAiControlled = state.ai_player === player || state.ai_player === "both";
 
   const panel = (
-    <div className="flex flex-col gap-2 p-3 bg-white rounded-xl shadow w-full lg:w-44">
+    <div className="flex flex-col gap-2 p-3 bg-white rounded-xl shadow w-full lg:w-44" data-testid={`panel-${player}`}>
 
       {/* プレイヤー名 + 手番表示 */}
       <div className="text-center">
@@ -114,7 +117,8 @@ export default function GameInfo({
         <HandPieces
           pieces={state.hand_pieces?.[player] ?? []}
           player={player}
-          currentPlayer={isAiControlled ? "black" : state.current_player}
+          currentPlayer={state.current_player}
+          interactive={!isAiControlled && !state.game_over}
           selectedHandPiece={isAiControlled ? null : selectedHandPiece}
           onHandPieceClick={isAiControlled ? () => {} : onHandPieceClick}
         />
