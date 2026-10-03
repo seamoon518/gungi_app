@@ -8,7 +8,6 @@
   - 置換表 (TT) + 静止探索               既存から継続
 """
 
-import copy
 import time
 import random
 from collections import Counter
@@ -207,8 +206,10 @@ def _is_quiet(move: tuple) -> bool:
 # ── 状態コピー + インプレース適用 ─────────────────────────────────────────────
 
 def _make_search_copy(state: GameState) -> GameState:
+    # 探索中は駒(Piece)をスタック間で移すだけで駒自体は書き換えないため、
+    # 各マスのリストだけを複製すれば十分（deepcopy は探索時間の約半分を占めていた）
     return GameState(
-        board=copy.deepcopy(state.board),
+        board=[[list(stack) for stack in row] for row in state.board],
         current_player=state.current_player,
         hand_pieces={k: list(v) for k, v in state.hand_pieces.items()},
         game_over=state.game_over,

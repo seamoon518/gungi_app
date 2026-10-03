@@ -150,3 +150,20 @@ def test_root_scores_stay_correct_across_iterative_deepening():
                             tt, km, hh, w, position_counter=pc, search_path_counter=counter)
         assert scores[cap] >= 90_000, (depth, scores[cap])
         assert max(scores, key=scores.get) == cap, depth
+
+
+def test_search_does_not_mutate_real_state():
+    """探索用コピーは駒を共有するため、探索後に元の局面が変わっていないことを確認する。"""
+    import copy
+    s = create_initial_state("joukyuu", "ai_vs_ai", None, "easy", "easy")
+    for _ in range(40):                       # 配置フェーズを進めて駒・手駒を揃える
+        if s.phase == "play":
+            break
+        get_ai_move_and_apply(s)
+    before_board = copy.deepcopy(s.board)
+    before_hand = copy.deepcopy(s.hand_pieces)
+    before_player = s.current_player
+    find_best_move(s, s.current_player, max_depth=2, time_limit=5.0, max_moves=15,
+                   weights=load_weights("tier2"))
+    assert s.board == before_board and s.hand_pieces == before_hand
+    assert s.current_player == before_player
