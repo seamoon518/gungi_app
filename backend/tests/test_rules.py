@@ -48,8 +48,8 @@ def test_initial_piece_sets():
 
 
 def test_initial_layout_is_point_symmetric():
-    # 黒陣は白陣を 180° 回転した配置（初級編は仕様確認待ちのため対象外）
-    for level in ("nyumon",):
+    # 黒陣は白陣を 180° 回転した配置
+    for level in ("nyumon", "shokyuu"):
         s = create_initial_state(level)
         for r in range(9):
             for c in range(9):
@@ -237,3 +237,10 @@ def test_sennichite_draw_after_fourth_repetition():
         plies += 1
         assert plies <= 12
     assert plies == 12 and s.winner is None
+
+
+def test_shokyuu_layout_matches_rulebook():
+    """rulebook.md の初級編（白陣2段目: □ 馬 弓 □ 槍 □ 弓 忍 □）"""
+    s = create_initial_state("shokyuu")
+    row = [s.board[1][c][0].type.value if s.board[1][c] else "□" for c in range(9)]
+    assert row == ["□", "馬", "弓", "□", "槍", "□", "弓", "忍", "□"]

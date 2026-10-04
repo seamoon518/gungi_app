@@ -8,7 +8,8 @@ Level initial placements:
   shokyuu (初級編):
     Fixed placement with 弓 added, max stack 2, no 師ツケ
     White board: 中(3,0) 帅(4,0) 大(5,0)
-                 馬(1,1) 弓(2,1) 槍(4,1) 弓(7,1) 忍(8,1)
+                 馬(1,1) 弓(2,1) 槍(4,1) 弓(6,1) 忍(7,1)
+    Black board: 白陣を 180° 回転した位置（rulebook.md 準拠）
                  兵(0,2) 砦(2,2) 侍(3,2) 兵(4,2) 侍(5,2) 砦(6,2) 兵(8,2)
     Hand: 小×2, 槍×2, 忍×1, 馬×1, 兵×1
 
@@ -60,7 +61,7 @@ _NYUMON_HAND_TYPES = [
 _SHOKYUU_WHITE_LAYOUT = [
     (3, 0, PieceType.CHU), (4, 0, PieceType.SUI), (5, 0, PieceType.TAI),
     (1, 1, PieceType.KIB), (2, 1, PieceType.YUM), (4, 1, PieceType.YAR),
-    (7, 1, PieceType.YUM), (8, 1, PieceType.SHI),
+    (6, 1, PieceType.YUM), (7, 1, PieceType.SHI),
     (0, 2, PieceType.HYO), (2, 2, PieceType.TOR), (3, 2, PieceType.SAM),
     (4, 2, PieceType.HYO), (5, 2, PieceType.SAM), (6, 2, PieceType.TOR),
     (8, 2, PieceType.HYO),
@@ -69,8 +70,8 @@ _SHOKYUU_BLACK_LAYOUT = [
     (0, 6, PieceType.HYO), (2, 6, PieceType.TOR), (3, 6, PieceType.SAM),
     (4, 6, PieceType.HYO), (5, 6, PieceType.SAM), (6, 6, PieceType.TOR),
     (8, 6, PieceType.HYO),
-    (1, 7, PieceType.KIB), (2, 7, PieceType.YUM), (4, 7, PieceType.YAR),
-    (7, 7, PieceType.YUM), (8, 7, PieceType.SHI),
+    (1, 7, PieceType.SHI), (2, 7, PieceType.YUM), (4, 7, PieceType.YAR),
+    (6, 7, PieceType.YUM), (7, 7, PieceType.KIB),
     (3, 8, PieceType.TAI), (4, 8, PieceType.SUI), (5, 8, PieceType.CHU),
 ]
 _SHOKYUU_HAND_TYPES = [
