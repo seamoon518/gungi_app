@@ -1,0 +1,13 @@
+{
+  "name": "gungi-e2e",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:pc": "playwright test --project=pc-1366 --project=pc-1920",
+    "test:sp": "playwright test --project=sp-320 --project=sp-375 --project=sp-390 --project=sp-412"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/node": "^20"
+  }
+}

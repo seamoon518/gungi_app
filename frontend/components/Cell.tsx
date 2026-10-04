@@ -24,13 +24,15 @@ interface Props {
 
 /**
  * セルサイズ:
- *   mobile (< 640px):  w-9  h-9  = 36px
+ *   mobile (< 640px):  36px（幅 360px 未満の端末では画面幅に合わせて縮める）
  *   sm     (640px+):   w-11 h-11 = 44px
  *   lg     (1024px+):  w-14 h-14 = 56px
  *
+ * 縮小時の計算: (画面幅 - 余白16px - 段番号20px) / 9
  * 駒は inset-[10%] で自動センタリング（セルの80%のサイズになる）
  */
-const CELL = "w-9 h-9 sm:w-11 sm:h-11 lg:w-14 lg:h-14";
+export const CELL_W = "w-[min(2.25rem,calc((100vw_-_36px)/9))] sm:w-11 lg:w-14";
+const CELL = `${CELL_W} h-[min(2.25rem,calc((100vw_-_36px)/9))] sm:h-11 lg:h-14`;
 
 /**
  * 凝モード用スタック設定（% 値・全画面サイズ対応）
@@ -90,6 +92,12 @@ export default function Cell({
   const cancelLongPress = () => {
     if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
   };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    cancelLongPress();
+    // 長押しでスタック確認を開いた直後に指を離すと、ブラウザが合成するクリックが
+    // 開いたばかりのモーダルの背景に当たって閉じてしまうため、クリックを発生させない
+    if (didLongPress.current) e.preventDefault();
+  };
   const handleClick = () => {
     if (didLongPress.current) { didLongPress.current = false; return; }
     onClick();
@@ -125,10 +133,13 @@ export default function Cell({
   return (
     <div
       className={`relative ${CELL} border border-gray-400 select-none hover:brightness-90 transition-all ${squareBg} ${cursor}`}
+      data-row={row}
+      data-col={col}
       onClick={handleClick}
       onTouchStart={handleTouchStart}
-      onTouchEnd={cancelLongPress}
+      onTouchEnd={handleTouchEnd}
       onTouchMove={cancelLongPress}
+      onContextMenu={e => e.preventDefault()}
     >
       {/* ── 通常ビュー（凝モードOFF or 空マス） ── */}
       {top && (

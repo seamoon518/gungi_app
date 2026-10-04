@@ -5,6 +5,9 @@ from models.piece import Piece
 # 待った機能で保持するスナップショットの最大数（手数）
 MAX_UNDO_SNAPSHOTS = 10
 
+# AI同士対戦の手数上限（これに達したら引き分け。決着がつかず延々と続くのを防ぐ）
+MAX_PLIES_AI_VS_AI = 300
+
 
 @dataclass(frozen=True)
 class GameRules:
@@ -41,6 +44,9 @@ class GameState:
     position_history: List[int] = field(default_factory=list)
     game_over: bool = False
     winner: Optional[Literal["black", "white"]] = None
+    # 終局理由: "sui"（帥を取った） / "resign"（投了） / "sennichite"（千日手）
+    #           / "move_limit"（AI同士の手数上限） / "no_moves"（合法手なし）
+    end_reason: Optional[str] = None
     level: str = "nyumon"
     mode: str = "pvp"
     ai_difficulty: Optional[str] = None          # AI vs Human の難易度（後方互換）
@@ -76,6 +82,7 @@ class GameState:
             },
             "game_over": self.game_over,
             "winner": self.winner,
+            "end_reason": self.end_reason,
             "move_count": len(self.move_history),
             "level": self.level,
             "mode": self.mode,

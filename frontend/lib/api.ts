@@ -5,13 +5,34 @@ import {
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8002";
 
+/** バックエンドがエラー応答を返したときの例外（status で 404 などを判別できる） */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, options);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail ?? `HTTP ${res.status}`);
+    const detail = typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`;
+    throw new ApiError(detail, res.status);
   }
   return res.json();
+}
+
+/** 画面に出すエラーメッセージ（通信エラー・対局消失は日本語で案内する） */
+export function errorMessage(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.status === 404) return "対局データが見つかりません（サーバーが再起動された可能性があります）。ホームから新しい対局を始めてください。";
+    return e.message;
+  }
+  if (e instanceof TypeError) return "サーバーに接続できません。通信環境を確認してください。";
+  return e instanceof Error ? e.message : String(e);
 }
 
 export const api = {

@@ -8,7 +8,8 @@ Level initial placements:
   shokyuu (初級編):
     Fixed placement with 弓 added, max stack 2, no 師ツケ
     White board: 中(3,0) 帅(4,0) 大(5,0)
-                 馬(1,1) 弓(2,1) 槍(4,1) 弓(7,1) 忍(8,1)
+                 馬(1,1) 弓(2,1) 槍(4,1) 弓(6,1) 忍(7,1)
+    Black board: 白陣を 180° 回転した位置（rulebook.md 準拠）
                  兵(0,2) 砦(2,2) 侍(3,2) 兵(4,2) 侍(5,2) 砦(6,2) 兵(8,2)
     Hand: 小×2, 槍×2, 忍×1, 馬×1, 兵×1
 
@@ -20,7 +21,9 @@ import copy
 from typing import List, Tuple, Optional
 
 from models.piece import Piece, PieceType
-from models.game_state import GameState, Move, GameRules, RULES_BY_LEVEL, MAX_UNDO_SNAPSHOTS
+from models.game_state import (
+    GameState, Move, GameRules, RULES_BY_LEVEL, MAX_UNDO_SNAPSHOTS, MAX_PLIES_AI_VS_AI,
+)
 from logic.movement import get_valid_moves
 from logic.arata import get_valid_arata_positions
 from logic.setup import get_valid_setup_positions, has_placed_sui
@@ -58,7 +61,7 @@ _NYUMON_HAND_TYPES = [
 _SHOKYUU_WHITE_LAYOUT = [
     (3, 0, PieceType.CHU), (4, 0, PieceType.SUI), (5, 0, PieceType.TAI),
     (1, 1, PieceType.KIB), (2, 1, PieceType.YUM), (4, 1, PieceType.YAR),
-    (7, 1, PieceType.YUM), (8, 1, PieceType.SHI),
+    (6, 1, PieceType.YUM), (7, 1, PieceType.SHI),
     (0, 2, PieceType.HYO), (2, 2, PieceType.TOR), (3, 2, PieceType.SAM),
     (4, 2, PieceType.HYO), (5, 2, PieceType.SAM), (6, 2, PieceType.TOR),
     (8, 2, PieceType.HYO),
@@ -67,8 +70,8 @@ _SHOKYUU_BLACK_LAYOUT = [
     (0, 6, PieceType.HYO), (2, 6, PieceType.TOR), (3, 6, PieceType.SAM),
     (4, 6, PieceType.HYO), (5, 6, PieceType.SAM), (6, 6, PieceType.TOR),
     (8, 6, PieceType.HYO),
-    (1, 7, PieceType.KIB), (2, 7, PieceType.YUM), (4, 7, PieceType.YAR),
-    (7, 7, PieceType.YUM), (8, 7, PieceType.SHI),
+    (1, 7, PieceType.SHI), (2, 7, PieceType.YUM), (4, 7, PieceType.YAR),
+    (6, 7, PieceType.YUM), (7, 7, PieceType.KIB),
     (3, 8, PieceType.TAI), (4, 8, PieceType.SUI), (5, 8, PieceType.CHU),
 ]
 _SHOKYUU_HAND_TYPES = [
@@ -221,6 +224,7 @@ def _finish_turn(state: GameState, player: str) -> Tuple[bool, str]:
     if winner:
         state.game_over = True
         state.winner = winner
+        state.end_reason = "sui"
         return True, ""
 
     # 手番を先に切り替えてからハッシュを計算する。
@@ -231,7 +235,13 @@ def _finish_turn(state: GameState, player: str) -> Tuple[bool, str]:
     if check_sennichite(state.position_history, h):
         state.game_over = True
         state.winner = None
+        state.end_reason = "sennichite"
         return True, ""
+
+    if state.mode == "ai_vs_ai" and len(state.move_history) >= MAX_PLIES_AI_VS_AI:
+        state.game_over = True
+        state.winner = None
+        state.end_reason = "move_limit"
 
     return True, ""
 
@@ -246,7 +256,6 @@ def apply_move(
         return False, "Game is already over."
     if state.phase != "play":
         return False, "初期配置フェーズ中は駒を動かせません。"
-    _save_snapshot(state)
 
     src_stack = state.board[from_row][from_col]
     if not src_stack:
@@ -266,6 +275,8 @@ def apply_move(
     if action == "tsuke_enemy" and (to_row, to_col) not in options.enemy_tsuke_moves:
         return False, "Cannot tsuke that enemy square."
 
+    # 失敗した操作で「待った」の記録が増えないよう、検証が済んでから保存する
+    _save_snapshot(state)
     new_board = copy.deepcopy(state.board)
     moving_piece = new_board[from_row][from_col][-1]
     player = state.current_player
@@ -295,7 +306,6 @@ def apply_arata(
         return False, "Game is already over."
     if state.phase != "play":
         return False, "初期配置フェーズ中は新を使えません。"
-    _save_snapshot(state)
 
     player = state.current_player
 
@@ -313,6 +323,7 @@ def apply_arata(
     if (to_row, to_col) not in valid:
         return False, "Invalid arata position."
 
+    _save_snapshot(state)
     piece = hand.pop(hand_idx)
 
     new_board = copy.deepcopy(state.board)
@@ -338,7 +349,6 @@ def apply_boushou(
         return False, "Game is already over."
     if state.phase != "play":
         return False, "Not in play phase."
-    _save_snapshot(state)
 
     # 移動元の駒が謀であることを確認
     src_stack = state.board[from_row][from_col]
@@ -378,6 +388,7 @@ def apply_boushou(
         return False, "No matching hand piece for boushou."
 
     # 実行
+    _save_snapshot(state)
     new_board = copy.deepcopy(state.board)
     new_hand = {k: list(v) for k, v in state.hand_pieces.items()}
 
@@ -411,7 +422,6 @@ def apply_setup_place(
     """Place a piece during the setup phase (中級/上級)."""
     if state.phase != "setup":
         return False, "初期配置フェーズではありません。"
-    _save_snapshot(state)
 
     player = state.current_player
 
@@ -433,6 +443,7 @@ def apply_setup_place(
     if (to_row, to_col) not in valid:
         return False, "自陣（3列目まで）にのみ配置できます。"
 
+    _save_snapshot(state)
     piece = hand.pop(hand_idx)
     new_board = copy.deepcopy(state.board)
     new_board[to_row][to_col].append(piece)
@@ -451,13 +462,13 @@ def apply_setup_done(state: GameState) -> Tuple[bool, str]:
     """Declare 済 during setup phase."""
     if state.phase != "setup":
         return False, "初期配置フェーズではありません。"
-    _save_snapshot(state)
 
     player = state.current_player
 
     if not has_placed_sui(state.board, player):
         return False, "帥を配置してから済を宣言してください。"
 
+    _save_snapshot(state)
     state.setup_done[player] = True
 
     if player == "white":

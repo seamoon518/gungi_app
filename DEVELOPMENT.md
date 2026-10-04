@@ -150,3 +150,39 @@ gungi_app/
 3. **謀の寝返り**: tsuke_enemy後のスタックで、手駒と同種の敵駒を置き換える
 4. **ポート**: ローカルはバックエンド8002（8000/8001は他アプリが使用）
 5. **Railway Root Directory**: `backend` に設定必須（プッシュ後にリセットされることあり）
+6. **対局データはバックエンドのメモリ上のみ**: 再起動すると消える。保持数は最大 500 局（古い順に削除）
+7. **同じ対局への更新リクエストは 1 つずつ処理**（`api/router.py` の対局ごとのロック）
+8. **AI同士対戦は 300 手で引き分け**（`MAX_PLIES_AI_VS_AI`。終局理由は `end_reason` で返す）
+9. **再読み込み・アプリ切替後の復帰**: フロントは対局IDを localStorage（`gungi:lastGameId`）に保存し、起動時に `/state` で復帰する
+
+---
+
+## 🧪 テスト
+
+### バックエンド（pytest）
+```bash
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest -m "not slow"   # ルール・API・AI探索の速いテスト（約10秒）
+python -m pytest                 # 全ルール×全難易度で AI 同士を指させるテストを含む（数分）
+```
+
+### AI同士の通し対局シミュレーション（強さ・思考時間の確認）
+```bash
+cd backend
+python -m tests.sim_ai_vs_ai --out /tmp/sim.jsonl --workers 3 --max-plies 150 \
+  --match nyumon:easy:easy:2 --match chukyuu:hard:easy:1
+```
+
+### E2E（Playwright・PC/スマホ）
+```bash
+cd e2e
+npm install
+npx playwright install chromium   # 初回のみ
+npm test          # backend(:8002)・frontend(:3000) を自動起動し、PC 2 サイズ・スマホ 4 サイズで実行
+npm run test:pc   # PC（1366×768 / 1920×1080）のみ
+npm run test:sp   # スマホ（320 / 375 / 390 / 412px 幅、タッチ操作）のみ
+E2E_BASE_URL=https://gungi-app.vercel.app npm test   # デプロイ済み環境に対して実行
+```
+- 機能テストは PC 1366px とスマホ 390px、レイアウト（`@layout`）は全サイズで実行する
+- `screenshots/` に各画面サイズのスクリーンショットが保存される（git 管理外）
