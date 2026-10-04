@@ -35,7 +35,14 @@ test.describe("E: AI同士（観戦）", () => {
     await expect(panel(page, "black").getByRole("button", { name: "凝 ON" })).toBeVisible();
 
     // 凝モードでタップ（PC はクリック）するとスタックを確認できる
-    await press(cell(page, 8, 4), ti);
+    // AI が駒を動かした直後でも空マスを押さないよう、盤面から駒のあるマスを選ぶ（黒陣の後方から探す）
+    const occupied = () => {
+      const b = log.latest!.board;
+      for (let r = 8; r >= 0; r--) for (let c = 0; c < 9; c++) if (b[r][c].stack.length) return [r, c] as const;
+      throw new Error("no piece");
+    };
+    const [ir, ic] = occupied();
+    await press(cell(page, ir, ic), ti);
     await expect(page.getByText("スタック確認")).toBeVisible();
     const n1 = log.latest!.move_count;
     await waitFor(() => log.latest!.move_count, (n) => n >= n1 + 1, 30_000);
@@ -44,7 +51,8 @@ test.describe("E: AI同士（観戦）", () => {
 
     if (isTouch(ti)) {
       await press(panel(page, "black").getByRole("button", { name: "凝 ON" }), ti);
-      await longPress(page, cell(page, 8, 4));
+      const [lr, lc] = occupied();
+      await longPress(page, cell(page, lr, lc));
       await expect(page.getByText("スタック確認")).toBeVisible();
       const n2 = log.latest!.move_count;
       await waitFor(() => log.latest!.move_count, (n) => n >= n2 + 1, 30_000);
