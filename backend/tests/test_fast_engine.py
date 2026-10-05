@@ -92,8 +92,11 @@ def test_fast_search_finds_sui_capture():
         assert best[:5] == ("board", 5, 4, 4, 4)
 
 
-def test_fast_search_same_depth_matches_python_score():
-    """同じ深さでの最善評価値が Python 版と一致する（探索アルゴリズムの移植確認）。"""
+def test_fast_search_same_depth_matches_python_score(monkeypatch):
+    """同じ深さでの最善評価値が Python 版と一致する（探索アルゴリズムの移植確認）。
+    高速エンジンだけの改良（静止探索4手・両手番の Null Move）は切って比べる。"""
+    monkeypatch.setenv("GUNGI_QDEPTH", "2")
+    monkeypatch.setenv("GUNGI_NULLBOTH", "0")
     from logic.ai.search import find_best_move
     for s in _positions(99, 12)[::4]:
         pi, fi = {}, {}
