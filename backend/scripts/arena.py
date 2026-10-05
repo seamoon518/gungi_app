@@ -17,6 +17,7 @@ arena.py: 2つの AI（別バージョンのコードでも可）を多数対局
     depth : 最大深さの上書き
     noise : ノイズの上書き
     weights: 重みファイル名の上書き（例 tier1）
+    moves : 各局面で読む候補手数（max_moves）の上書き
 """
 
 import argparse
@@ -86,7 +87,7 @@ def serve(tree: str) -> None:
         diff = p.get("diff", "hard")
         params = dict(base[diff])
         for key, name in (("time", "time_limit"), ("depth", "max_depth"),
-                          ("noise", "noise"), ("weights", "weights")):
+                          ("noise", "noise"), ("weights", "weights"), ("moves", "max_moves")):
             if key in p:
                 params[name] = p[key]
         eng._DIFFICULTY_PARAMS[diff] = params
@@ -108,7 +109,7 @@ class Engine:
             [sys.executable, os.path.abspath(__file__), "--serve", tree],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, cwd=tree,
         )
-        self.params = {k: (float(v) if k in ("time",) else int(v) if k in ("depth", "noise") else v)
+        self.params = {k: (float(v) if k in ("time",) else int(v) if k in ("depth", "noise", "moves") else v)
                        for k, v in spec.items() if k != "tree"}
 
     def play(self, state_dict: dict, seed: int) -> dict:
