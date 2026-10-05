@@ -126,7 +126,8 @@ def _find_best_move_locked(b, state, ai_player, max_depth, time_limit, noise, ma
     board, heights, hands, side = state_to_arrays(state)
     b.B[0], b.H[0], b.HD[0], b.SIDE[0], b.OVER[0] = board, heights, hands, side, 0
     ai = 0 if ai_player == "black" else 1
-    P = np.array([state.rules.max_stack, 1 if state.rules.sui_can_tsuke else 0, _knob("QDEPTH", 2)], np.int64)
+    P = np.array([state.rules.max_stack, 1 if state.rules.sui_can_tsuke else 0, _knob("QDEPTH", 4),
+                  _knob("NULLBOTH", 1), _knob("LMR", 0), _knob("NMR", 0)], np.int64)
     W, PV, HB, HR = weights_to_arrays(weights or {})
 
     gen = np.zeros(core.MAX_MOVES_GEN, np.int64)
