@@ -667,6 +667,8 @@ def quiescence(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB,
 # Numba は再帰関数をキャッシュから読み込むと落ちるため、各深さの状態を配列（フレーム）に持ち、
 # 「子局面を探索する」「子の結果を受け取る」をループで処理する。
 # ステージ: 子の探索を終えたあとにどこから再開するかを表す。
+LOSS_SCORE = 90000.0   # これ以上（以下）は勝ち（負け）が確定した評価値
+
 ST_ENTER, ST_AFTER_NULL, ST_GEN, ST_NEXT, ST_AFTER_S1, ST_AFTER_S2, ST_AFTER_S3, ST_FINISH = 0, 1, 2, 3, 4, 5, 6, 7
 
 
@@ -713,6 +715,7 @@ def pvs(B, H, HD, SIDE, root_ply, ai, depth, alpha, beta, null_ok, OVER, P, W, P
     f_stage = np.zeros(n_ply, np.int64)
     f_i = np.zeros(n_ply, np.int64)
     f_n = np.zeros(n_ply, np.int64)
+    f_ntot = np.zeros(n_ply, np.int64)
     f_red = np.zeros(n_ply, np.int64)
     f_best = np.zeros(n_ply, np.float64)
     f_bmove = np.zeros(n_ply, np.int64)
@@ -837,6 +840,7 @@ def pvs(B, H, HD, SIDE, root_ply, ai, depth, alpha, beta, null_ok, OVER, P, W, P
                         obuf[ply, 0] = tm
                         break
             f_n[ply] = n if n <= max_moves else max_moves
+            f_ntot[ply] = n
             f_i[ply] = 0
             f_best[ply] = -INF if maximizing else INF
             f_bmove[ply] = -1
@@ -847,8 +851,13 @@ def pvs(B, H, HD, SIDE, root_ply, ai, depth, alpha, beta, null_ok, OVER, P, W, P
         if st == ST_NEXT:
             i = f_i[ply]
             if i >= f_n[ply]:
-                f_stage[ply] = ST_FINISH
-                continue
+                # 上位の候補手がすべて負け（詰み）なら、削った残りの手も読む（受けの見落としで偽の詰みを読まないため）
+                if f_n[ply] < f_ntot[ply] and ((maximizing and f_best[ply] <= -LOSS_SCORE)
+                                               or ((not maximizing) and f_best[ply] >= LOSS_SCORE)):
+                    f_n[ply] = f_ntot[ply]
+                else:
+                    f_stage[ply] = ST_FINISH
+                    continue
             m = obuf[ply, i]
             over = _child(B, H, HD, SIDE, ply, m)
             OVER[ply + 1] = (side + 1) if over == 1 else 0

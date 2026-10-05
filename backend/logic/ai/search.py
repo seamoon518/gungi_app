@@ -38,6 +38,7 @@ MAX_KILLER_DEPTH = 16
 _NMP_R = 2
 # Aspiration Window 初期幅
 _ASP_DELTA = 50
+_LOSS_SCORE = 90000   # これ以上（以下）は勝ち（負け）が確定した評価値
 
 
 # ── データ構造 ────────────────────────────────────────────────────────────────
@@ -498,14 +499,15 @@ def _pvs_node(
         moves.remove(tt_first)
         moves.insert(0, tt_first)
 
-    if len(moves) > max_moves:
-        moves = moves[:max_moves]
-
     best_score = -inf if maximizing else inf
     best_move  = None
     orig_alpha = alpha
 
     for i, move in enumerate(moves):
+        # 上位 max_moves 手だけ読む。ただし上位がすべて負け（詰み）なら残りも読む
+        # （受けの手を削って偽の詰みを読まないため）
+        if i >= max_moves and not (best_score <= -_LOSS_SCORE if maximizing else best_score >= _LOSS_SCORE):
+            break
         ns = _make_search_copy(state)
         if not _apply_move_inplace(ns, move):
             continue
