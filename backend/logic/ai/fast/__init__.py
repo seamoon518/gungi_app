@@ -34,7 +34,7 @@ _ASP_DELTA = 50
 _KILLER_ROWS = 18   # search.py の MAX_KILLER_DEPTH + 2 と同じ
 
 
-# コンパイル（約 45 秒）が終わるまでは呼び出し側が Python 版を使う
+# コンパイル（初回のみ約 45 秒、2 回目以降はキャッシュから数秒）が終わるまでは Python 版を使う
 _READY = False
 # 置換表などの配列を共有するため、探索は同時に 1 つだけ行う
 _LOCK = threading.Lock()
@@ -119,8 +119,10 @@ def _find_best_move_locked(state, ai_player, max_depth, time_limit, noise, max_m
     hist_keys = np.array(sorted(cnt), dtype=np.uint64)
     hist_cnt = np.array([cnt[k] for k in sorted(cnt)], dtype=np.int64)
     stats = np.zeros(2, np.int64)
-    deadline = start + time_limit
-    S = (b.B, b.H, b.HD, b.SIDE)
+    deadline = 0.0   # 未使用（時間切れはタイマーで stats[1] を立てて知らせる）
+    timer = threading.Timer(max(0.0, start + time_limit - time.time()), stats.__setitem__, (1, 1))
+    timer.daemon = True
+    timer.start()
 
     best_move = moves[0]
     prev_score = 0.0
@@ -135,7 +137,7 @@ def _find_best_move_locked(state, ai_player, max_depth, time_limit, noise, max_m
                 lo, hi = -inf, inf
             root = np.array(moves, np.int64)
             scores = np.zeros(len(moves), np.float64)
-            ok = core.search_root(S, ai, depth, lo, hi, root, len(moves), scores, b.OVER, P, W, PV, HB, HR,
+            ok = core.search_root(b.B, b.H, b.HD, b.SIDE, ai, depth, lo, hi, root, len(moves), scores, b.OVER, P, W, PV, HB, HR,
                                   b.tt_k, b.tt_i, b.tt_s, b.killers, b.hist, b.ev_key, b.ev_val,
                                   b.path, hist_keys, hist_cnt, stats, deadline, b.mbuf, max_moves)
             if not ok:
@@ -164,6 +166,7 @@ def _find_best_move_locked(state, ai_player, max_depth, time_limit, noise, max_m
             best_move = scored[0][1]
         moves = [best_move] + [m for m in moves if m != best_move]
 
+    timer.cancel()
     if info is not None:
         info["depth"] = completed
         info["root_moves"] = n

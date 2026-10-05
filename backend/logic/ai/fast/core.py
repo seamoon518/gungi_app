@@ -5,9 +5,6 @@ logic/movement.py・logic/ai/evaluate.py・logic/ai/search.py と同じ判定・
 配列上で行う。Python 版との一致は tests/test_fast_engine.py で確認する。
 """
 
-import time
-
-import numba
 import numpy as np
 from numba import njit
 
@@ -517,21 +514,13 @@ def has_sui(board, heights, player):
 # ── 探索（search.pvs / quiescence と同じアルゴリズム） ──────────────────────────
 
 @njit(cache=True)
-def _now():
-    with numba.objmode(t="float64"):
-        t = time.time()
-    return t
-
-
-@njit(cache=True)
 def _is_quiet(m):
     kind = (m >> 24) & 0xF
     return kind == KIND_AUTO or kind == KIND_ARATA
 
 
 @njit(cache=True)
-def _eval_cached(S, ply, ai, P, W, PV, HB, HR, ev_key, ev_val):
-    B, H, HD, SIDE = S
+def _eval_cached(B, H, HD, SIDE, ply, ai, P, W, PV, HB, HR, ev_key, ev_val):
     key = compute_hash(B[ply], H[ply], HD[ply], SIDE[ply])
     idx = np.int64(key & np.uint64(EV_SIZE - 1))
     if ev_key[idx] == key and ev_val[idx] > -1e17:
@@ -543,9 +532,8 @@ def _eval_cached(S, ply, ai, P, W, PV, HB, HR, ev_key, ev_val):
 
 
 @njit(cache=True)
-def _child(S, ply, m):
+def _child(B, H, HD, SIDE, ply, m):
     """ply の局面をコピーして手 m を指した局面を ply+1 に作る。帥を取ったら 1。"""
-    B, H, HD, SIDE = S
     B[ply + 1][:] = B[ply]
     H[ply + 1][:] = H[ply]
     HD[ply + 1][:] = HD[ply]
@@ -554,21 +542,39 @@ def _child(S, ply, m):
     return over
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _tick(stats, deadline):
+    # 時間切れは Python 側のタイマーが stats[1] = 1 を書き込んで知らせる
+    # （Numba 内で時計を読むとキャッシュできなくなるため。探索中は GIL を解放している）
     stats[0] += 1
-    if (stats[0] & 511) == 0 and _now() > deadline:
-        stats[1] = 1
     return stats[1] == 1
 
 
-@njit(cache=False)  # 再帰関数はキャッシュから読み込むと Numba の不具合で落ちるため毎回コンパイル
-def quiescence(S, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, ev_val,
+# 静止探索（取る手だけを 2 手先まで読む）。search.quiescence と同じ判定。
+# 再帰関数を別の再帰関数（pvs）から呼ぶと Numba のキャッシュ読み込みで落ちるため、
+# 深さごとに関数を分けて再帰をなくしている（quiescence → _q1 → _q0）。
+@njit(cache=True, nogil=True)
+def _q0(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, ev_val,
+        stats, deadline, mbuf):
+    """静止探索の末端（静的評価のみ）。"""
+    if _tick(stats, deadline):
+        return 0.0
+    stand = _eval_cached(B, H, HD, SIDE, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+    if SIDE[ply] == ai:
+        if stand >= beta:
+            return beta
+    else:
+        if stand <= alpha:
+            return alpha
+    return stand
+
+
+@njit(cache=True, nogil=True)
+def _q1(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, ev_val,
                stats, deadline, mbuf):
     if _tick(stats, deadline):
         return 0.0
-    B, H, HD, SIDE = S
-    stand = _eval_cached(S, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+    stand = _eval_cached(B, H, HD, SIDE, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
     maximizing = SIDE[ply] == ai
     if maximizing:
         if stand >= beta:
@@ -593,10 +599,10 @@ def quiescence(S, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, 
     order = np.argsort(keys, kind="mergesort")
     ordered = moves[:n][order].copy()
     for i in range(n):
-        over = _child(S, ply, ordered[i])
+        over = _child(B, H, HD, SIDE, ply, ordered[i])
         OVER[ply + 1] = (SIDE[ply] + 1) if over == 1 else 0
-        v = quiescence(S, ply + 1, ai, alpha, beta, qdepth - 1, OVER, P, W, PV, HB, HR,
-                       ev_key, ev_val, stats, deadline, mbuf)
+        v = _q0(B, H, HD, SIDE, ply + 1, ai, alpha, beta, qdepth - 1, OVER, P, W, PV, HB, HR,
+                  ev_key, ev_val, stats, deadline, mbuf)
         if stats[1] == 1:
             return 0.0
         if maximizing:
@@ -610,74 +616,63 @@ def quiescence(S, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, 
     return alpha if maximizing else beta
 
 
-@njit(cache=False)  # 再帰関数はキャッシュから読み込むと Numba の不具合で落ちるため毎回コンパイル
-def pvs(S, ply, ai, depth, alpha, beta, null_ok, OVER, P, W, PV, HB, HR,
-        tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
-        stats, deadline, mbuf, max_moves):
+@njit(cache=True, nogil=True)
+def quiescence(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, ev_val,
+               stats, deadline, mbuf):
     if _tick(stats, deadline):
         return 0.0
-    B, H, HD, SIDE = S
-    key = compute_hash(B[ply], H[ply], HD[ply], SIDE[ply])
-
-    # 千日手回避: 実対局の出現回数 + 探索経路上の出現回数が 3 以上なら引き分け扱い
-    gi = np.searchsorted(hist_keys, key)
-    gc = hist_cnt[gi] if gi < hist_keys.shape[0] and hist_keys[gi] == key else 0
-    pc = 0
-    for i in range(1, ply):
-        if path[i] == key:
-            pc += 1
-    if gc + pc >= 3:
-        return 0.0
-    path[ply] = key
-
-    idx = np.int64(key & np.uint64(TT_SIZE - 1))
-    tt_move = -1
-    if tt_k[idx] == key and tt_i[idx, 0] >= 0:
-        tt_move = tt_i[idx, 2]
-        if tt_i[idx, 0] >= depth:
-            s = tt_s[idx]
-            f = tt_i[idx, 1]
-            if f == TT_EXACT:
-                return s
-            if f == TT_LOWER:
-                alpha = max(alpha, s)
-            elif f == TT_UPPER:
-                beta = min(beta, s)
-            if alpha >= beta:
-                return s
-
+    stand = _eval_cached(B, H, HD, SIDE, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+    maximizing = SIDE[ply] == ai
+    if maximizing:
+        if stand >= beta:
+            return beta
+        alpha = max(alpha, stand)
+    else:
+        if stand <= alpha:
+            return alpha
+        beta = min(beta, stand)
+    if qdepth == 0:
+        return stand
     if OVER[ply] != 0:
-        return (100000.0 + depth) if OVER[ply] - 1 == ai else (-100000.0 - depth)
-    if depth == 0:
-        return quiescence(S, ply, ai, alpha, beta, 2, OVER, P, W, PV, HB, HR, ev_key, ev_val,
-                          stats, deadline, mbuf)
-
-    side = SIDE[ply]
-    maximizing = side == ai
-
-    if null_ok and depth >= 3 and maximizing:
-        se = _eval_cached(S, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
-        if se >= beta:
-            B[ply + 1][:] = B[ply]
-            H[ply + 1][:] = H[ply]
-            HD[ply + 1][:] = HD[ply]
-            SIDE[ply + 1] = 1 - side
-            OVER[ply + 1] = 0
-            ns = pvs(S, ply + 1, ai, depth - 3, beta - 1, beta, False, OVER, P, W, PV, HB, HR,
-                     tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
-                     stats, deadline, mbuf, max_moves)
-            if stats[1] == 1:
-                return 0.0
-            if ns >= beta:
-                return beta
-
+        return 90000.0 if OVER[ply] - 1 == ai else -90000.0
     moves = mbuf[ply]
-    n = gen_moves(B[ply], H[ply], HD[ply], side, P[0], P[1], moves, 0)
-    if n == 0:
-        return _eval_cached(S, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+    n = gen_moves(B[ply], H[ply], HD[ply], SIDE[ply], P[0], P[1], moves, 1)
+    # 取る駒の価値が高い順（安定ソート）
+    keys = np.empty(n, np.float64)
+    for i in range(n):
+        tr = (moves[i] >> 12) & 0xF
+        tc = (moves[i] >> 8) & 0xF
+        keys[i] = -ORDER_PV[ptype(B[ply][tr, tc, H[ply][tr, tc] - 1])]
+    order = np.argsort(keys, kind="mergesort")
+    ordered = moves[:n][order].copy()
+    for i in range(n):
+        over = _child(B, H, HD, SIDE, ply, ordered[i])
+        OVER[ply + 1] = (SIDE[ply] + 1) if over == 1 else 0
+        v = _q1(B, H, HD, SIDE, ply + 1, ai, alpha, beta, qdepth - 1, OVER, P, W, PV, HB, HR,
+                  ev_key, ev_val, stats, deadline, mbuf)
+        if stats[1] == 1:
+            return 0.0
+        if maximizing:
+            if v >= beta:
+                return beta
+            alpha = max(alpha, v)
+        else:
+            if v <= alpha:
+                return alpha
+            beta = min(beta, v)
+    return alpha if maximizing else beta
 
-    # 並べ替え: 取る > キラー > 謀 > 敵へのツケ > 履歴 > 新 > その他（安定ソート）
-    kd = depth if depth < killers.shape[0] else killers.shape[0] - 1
+
+# ── PVS（search.pvs と同じアルゴリズムを、再帰を使わず明示的なスタックで実行する） ────────
+# Numba は再帰関数をキャッシュから読み込むと落ちるため、各深さの状態を配列（フレーム）に持ち、
+# 「子局面を探索する」「子の結果を受け取る」をループで処理する。
+# ステージ: 子の探索を終えたあとにどこから再開するかを表す。
+ST_ENTER, ST_AFTER_NULL, ST_GEN, ST_NEXT, ST_AFTER_S1, ST_AFTER_S2, ST_AFTER_S3, ST_FINISH = 0, 1, 2, 3, 4, 5, 6, 7
+
+
+@njit(cache=True, nogil=True)
+def _order(B, H, ply, n, depth, killers, hist, moves, out):
+    """手の並べ替え: 取る > キラー > 謀 > 敵へのツケ > 履歴 > 新 > その他（安定ソート）。"""
     keys = np.empty(n, np.float64)
     for i in range(n):
         m = moves[i]
@@ -702,110 +697,270 @@ def pvs(S, ply, ai, depth, alpha, beta, null_ok, OVER, P, W, PV, HB, HR,
             pri = 500.0
         keys[i] = -pri
     order = np.argsort(keys, kind="mergesort")
-    ordered = moves[:n][order].copy()
-    if tt_move >= 0:
-        for i in range(n):
-            if ordered[i] == tt_move:
-                for j in range(i, 0, -1):
-                    ordered[j] = ordered[j - 1]
-                ordered[0] = tt_move
-                break
-    if n > max_moves:
-        n = max_moves
-
-    best = -INF if maximizing else INF
-    best_move = -1
-    orig_alpha = alpha
     for i in range(n):
-        m = ordered[i]
-        over = _child(S, ply, m)
-        OVER[ply + 1] = (side + 1) if over == 1 else 0
-        red = 1 if (depth >= 3 and i >= 4 and _is_quiet(m)) else 0
-        if i == 0:
-            v = pvs(S, ply + 1, ai, depth - 1, alpha, beta, True, OVER, P, W, PV, HB, HR,
-                    tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
-                    stats, deadline, mbuf, max_moves)
-        elif maximizing:
-            v = pvs(S, ply + 1, ai, depth - 1 - red, alpha, alpha + 1, True, OVER, P, W, PV, HB, HR,
-                    tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
-                    stats, deadline, mbuf, max_moves)
-            if v > alpha and red > 0:
-                over = _child(S, ply, m)
-                OVER[ply + 1] = (side + 1) if over == 1 else 0
-                v = pvs(S, ply + 1, ai, depth - 1, alpha, alpha + 1, True, OVER, P, W, PV, HB, HR,
-                        tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
-                        stats, deadline, mbuf, max_moves)
-            if v > alpha and v < beta:
-                over = _child(S, ply, m)
-                OVER[ply + 1] = (side + 1) if over == 1 else 0
-                v = pvs(S, ply + 1, ai, depth - 1, alpha, beta, True, OVER, P, W, PV, HB, HR,
-                        tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
-                        stats, deadline, mbuf, max_moves)
-        else:
-            v = pvs(S, ply + 1, ai, depth - 1 - red, beta - 1, beta, True, OVER, P, W, PV, HB, HR,
-                    tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
-                    stats, deadline, mbuf, max_moves)
-            if v < beta and red > 0:
-                over = _child(S, ply, m)
-                OVER[ply + 1] = (side + 1) if over == 1 else 0
-                v = pvs(S, ply + 1, ai, depth - 1, beta - 1, beta, True, OVER, P, W, PV, HB, HR,
-                        tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
-                        stats, deadline, mbuf, max_moves)
-            if v < beta and v > alpha:
-                over = _child(S, ply, m)
-                OVER[ply + 1] = (side + 1) if over == 1 else 0
-                v = pvs(S, ply + 1, ai, depth - 1, alpha, beta, True, OVER, P, W, PV, HB, HR,
-                        tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
-                        stats, deadline, mbuf, max_moves)
-        if stats[1] == 1:
-            return 0.0
-        if maximizing:
-            if v > best:
-                best = v
-                best_move = m
-            alpha = max(alpha, best)
-        else:
-            if v < best:
-                best = v
-                best_move = m
-            beta = min(beta, best)
-        if alpha >= beta:
-            if _is_quiet(m):
-                if depth < killers.shape[0] and killers[depth, 0] != m:
-                    killers[depth, 1] = killers[depth, 0]
-                    killers[depth, 0] = m
-                if ((m >> 24) & 0xF) == KIND_AUTO:
-                    fr = (m >> 20) & 0xF; fc = (m >> 16) & 0xF; tr = (m >> 12) & 0xF; tc = (m >> 8) & 0xF
-                    hist[fr, fc, tr, tc] = min(hist[fr, fc, tr, tc] + depth * depth, 8000)
-            break
-
-    if best_move >= 0:
-        if best <= orig_alpha:
-            flag = TT_UPPER
-        elif best >= beta:
-            flag = TT_LOWER
-        else:
-            flag = TT_EXACT
-        tt_k[idx] = key
-        tt_i[idx, 0] = depth
-        tt_i[idx, 1] = flag
-        tt_i[idx, 2] = best_move
-        tt_s[idx] = best
-        return best
-    return _eval_cached(S, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+        out[i] = moves[order[i]]
 
 
-@njit(cache=False)  # 再帰関数はキャッシュから読み込むと Numba の不具合で落ちるため毎回コンパイル
-def search_root(S, ai, depth, lo, hi, root_moves, n_root, out_scores, OVER, P, W, PV, HB, HR,
+@njit(cache=True, nogil=True)
+def pvs(B, H, HD, SIDE, root_ply, ai, depth, alpha, beta, null_ok, OVER, P, W, PV, HB, HR,
+        tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
+        stats, deadline, mbuf, max_moves):
+    n_ply = B.shape[0]
+    f_depth = np.zeros(n_ply, np.int64)
+    f_alpha = np.zeros(n_ply, np.float64)
+    f_beta = np.zeros(n_ply, np.float64)
+    f_null = np.zeros(n_ply, np.bool_)
+    f_stage = np.zeros(n_ply, np.int64)
+    f_i = np.zeros(n_ply, np.int64)
+    f_n = np.zeros(n_ply, np.int64)
+    f_red = np.zeros(n_ply, np.int64)
+    f_best = np.zeros(n_ply, np.float64)
+    f_bmove = np.zeros(n_ply, np.int64)
+    f_oalpha = np.zeros(n_ply, np.float64)
+    f_ttmove = np.zeros(n_ply, np.int64)
+    f_idx = np.zeros(n_ply, np.int64)
+    f_key = np.zeros(n_ply, np.uint64)
+    obuf = np.zeros((n_ply, mbuf.shape[1]), np.int64)
+
+    ply = root_ply
+    f_depth[ply] = depth
+    f_alpha[ply] = alpha
+    f_beta[ply] = beta
+    f_null[ply] = null_ok
+    f_stage[ply] = ST_ENTER
+    ret = 0.0
+    returning = False   # True: この反復で ret を親へ返す
+
+    while True:
+        if returning:
+            returning = False
+            if ply == root_ply:
+                return ret
+            ply -= 1
+            if stats[1] == 1:
+                return 0.0
+        st = f_stage[ply]
+        d = f_depth[ply]
+        side = SIDE[ply]
+        maximizing = side == ai
+
+        if st == ST_ENTER:
+            if _tick(stats, deadline):
+                return 0.0
+            key = compute_hash(B[ply], H[ply], HD[ply], side)
+            # 千日手回避: 実対局の出現回数 + 探索経路上の出現回数が 3 以上なら引き分け扱い
+            gi = np.searchsorted(hist_keys, key)
+            gc = hist_cnt[gi] if gi < hist_keys.shape[0] and hist_keys[gi] == key else 0
+            pc = 0
+            for k in range(1, ply):
+                if path[k] == key:
+                    pc += 1
+            if gc + pc >= 3:
+                ret = 0.0
+                returning = True
+                continue
+            path[ply] = key
+            idx = np.int64(key & np.uint64(TT_SIZE - 1))
+            f_key[ply] = key
+            f_idx[ply] = idx
+            f_ttmove[ply] = -1
+            a = f_alpha[ply]
+            bt = f_beta[ply]
+            if tt_k[idx] == key and tt_i[idx, 0] >= 0:
+                f_ttmove[ply] = tt_i[idx, 2]
+                if tt_i[idx, 0] >= d:
+                    sc = tt_s[idx]
+                    fl = tt_i[idx, 1]
+                    if fl == TT_EXACT:
+                        ret = sc
+                        returning = True
+                        continue
+                    if fl == TT_LOWER:
+                        a = max(a, sc)
+                    elif fl == TT_UPPER:
+                        bt = min(bt, sc)
+                    if a >= bt:
+                        ret = sc
+                        returning = True
+                        continue
+            f_alpha[ply] = a
+            f_beta[ply] = bt
+            if OVER[ply] != 0:
+                ret = (100000.0 + d) if OVER[ply] - 1 == ai else (-100000.0 - d)
+                returning = True
+                continue
+            if d == 0:
+                ret = quiescence(B, H, HD, SIDE, ply, ai, a, bt, 2, OVER, P, W, PV, HB, HR,
+                                 ev_key, ev_val, stats, deadline, mbuf)
+                returning = True
+                continue
+            if f_null[ply] and d >= 3 and maximizing:
+                se = _eval_cached(B, H, HD, SIDE, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+                if se >= bt:
+                    B[ply + 1][:] = B[ply]
+                    H[ply + 1][:] = H[ply]
+                    HD[ply + 1][:] = HD[ply]
+                    SIDE[ply + 1] = 1 - side
+                    OVER[ply + 1] = 0
+                    f_stage[ply] = ST_AFTER_NULL
+                    ply += 1
+                    f_depth[ply] = d - 3
+                    f_alpha[ply] = bt - 1
+                    f_beta[ply] = bt
+                    f_null[ply] = False
+                    f_stage[ply] = ST_ENTER
+                    continue
+            f_stage[ply] = ST_GEN
+            continue
+
+        if st == ST_AFTER_NULL:
+            if ret >= f_beta[ply]:
+                ret = f_beta[ply]
+                returning = True
+                continue
+            f_stage[ply] = ST_GEN
+            continue
+
+        if st == ST_GEN:
+            n = gen_moves(B[ply], H[ply], HD[ply], side, P[0], P[1], mbuf[ply], 0)
+            if n == 0:
+                ret = _eval_cached(B, H, HD, SIDE, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+                returning = True
+                continue
+            _order(B, H, ply, n, d, killers, hist, mbuf[ply], obuf[ply])
+            tm = f_ttmove[ply]
+            if tm >= 0:
+                for i in range(n):
+                    if obuf[ply, i] == tm:
+                        for j in range(i, 0, -1):
+                            obuf[ply, j] = obuf[ply, j - 1]
+                        obuf[ply, 0] = tm
+                        break
+            f_n[ply] = n if n <= max_moves else max_moves
+            f_i[ply] = 0
+            f_best[ply] = -INF if maximizing else INF
+            f_bmove[ply] = -1
+            f_oalpha[ply] = f_alpha[ply]
+            f_stage[ply] = ST_NEXT
+            continue
+
+        if st == ST_NEXT:
+            i = f_i[ply]
+            if i >= f_n[ply]:
+                f_stage[ply] = ST_FINISH
+                continue
+            m = obuf[ply, i]
+            over = _child(B, H, HD, SIDE, ply, m)
+            OVER[ply + 1] = (side + 1) if over == 1 else 0
+            red = 1 if (d >= 3 and i >= 4 and _is_quiet(m)) else 0
+            f_red[ply] = red
+            a = f_alpha[ply]
+            bt = f_beta[ply]
+            if i == 0:
+                cd, ca, cb = d - 1, a, bt
+                f_stage[ply] = ST_AFTER_S3
+            elif maximizing:
+                cd, ca, cb = d - 1 - red, a, a + 1
+                f_stage[ply] = ST_AFTER_S1
+            else:
+                cd, ca, cb = d - 1 - red, bt - 1, bt
+                f_stage[ply] = ST_AFTER_S1
+            ply += 1
+            f_depth[ply] = cd
+            f_alpha[ply] = ca
+            f_beta[ply] = cb
+            f_null[ply] = True
+            f_stage[ply] = ST_ENTER
+            continue
+
+        if st == ST_AFTER_S1 or st == ST_AFTER_S2:
+            v = ret
+            a = f_alpha[ply]
+            bt = f_beta[ply]
+            m = obuf[ply, f_i[ply]]
+            research = False
+            if st == ST_AFTER_S1 and f_red[ply] > 0 and ((maximizing and v > a) or ((not maximizing) and v < bt)):
+                # LMR で浅く読んだ手が良さそうなら、本来の深さで零窓探索し直す
+                cd = d - 1
+                ca, cb = (a, a + 1) if maximizing else (bt - 1, bt)
+                f_stage[ply] = ST_AFTER_S2
+                research = True
+            elif v > a and v < bt:
+                # 零窓探索が窓の内側に入ったら、全窓で探索し直す
+                cd, ca, cb = d - 1, a, bt
+                f_stage[ply] = ST_AFTER_S3
+                research = True
+            if research:
+                over = _child(B, H, HD, SIDE, ply, m)
+                OVER[ply + 1] = (side + 1) if over == 1 else 0
+                ply += 1
+                f_depth[ply] = cd
+                f_alpha[ply] = ca
+                f_beta[ply] = cb
+                f_null[ply] = True
+                f_stage[ply] = ST_ENTER
+                continue
+            f_stage[ply] = ST_AFTER_S3   # 再探索なし: この値で更新する
+            continue
+
+        if st == ST_AFTER_S3:
+            v = ret
+            m = obuf[ply, f_i[ply]]
+            if maximizing:
+                if v > f_best[ply]:
+                    f_best[ply] = v
+                    f_bmove[ply] = m
+                f_alpha[ply] = max(f_alpha[ply], f_best[ply])
+            else:
+                if v < f_best[ply]:
+                    f_best[ply] = v
+                    f_bmove[ply] = m
+                f_beta[ply] = min(f_beta[ply], f_best[ply])
+            if f_alpha[ply] >= f_beta[ply]:
+                if _is_quiet(m):
+                    if d < killers.shape[0] and killers[d, 0] != m:
+                        killers[d, 1] = killers[d, 0]
+                        killers[d, 0] = m
+                    if ((m >> 24) & 0xF) == KIND_AUTO:
+                        fr = (m >> 20) & 0xF; fc = (m >> 16) & 0xF; tr = (m >> 12) & 0xF; tc = (m >> 8) & 0xF
+                        hist[fr, fc, tr, tc] = min(hist[fr, fc, tr, tc] + d * d, 8000)
+                f_stage[ply] = ST_FINISH
+                continue
+            f_i[ply] += 1
+            f_stage[ply] = ST_NEXT
+            continue
+
+        # ST_FINISH: 置換表に保存して親へ返す
+        if f_bmove[ply] >= 0:
+            best = f_best[ply]
+            if best <= f_oalpha[ply]:
+                flag = TT_UPPER
+            elif best >= f_beta[ply]:
+                flag = TT_LOWER
+            else:
+                flag = TT_EXACT
+            idx = f_idx[ply]
+            tt_k[idx] = f_key[ply]
+            tt_i[idx, 0] = d
+            tt_i[idx, 1] = flag
+            tt_i[idx, 2] = f_bmove[ply]
+            tt_s[idx] = best
+            ret = best
+        else:
+            ret = _eval_cached(B, H, HD, SIDE, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+        returning = True
+
+
+@njit(cache=True, nogil=True)
+def search_root(B, H, HD, SIDE, ai, depth, lo, hi, root_moves, n_root, out_scores, OVER, P, W, PV, HB, HR,
                 tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
                 stats, deadline, mbuf, max_moves):
     """ルートの全候補手を深さ depth で評価する（search.find_best_move の 1 反復分）。完了なら 1。"""
-    B, H, HD, SIDE = S
     alpha_root = lo
     for i in range(n_root):
-        over = _child(S, 0, root_moves[i])
+        over = _child(B, H, HD, SIDE, 0, root_moves[i])
         OVER[1] = (SIDE[0] + 1) if over == 1 else 0
-        sc = pvs(S, 1, ai, depth - 1, alpha_root, hi, True, OVER, P, W, PV, HB, HR,
+        sc = pvs(B, H, HD, SIDE, 1, ai, depth - 1, alpha_root, hi, True, OVER, P, W, PV, HB, HR,
                  tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
                  stats, deadline, mbuf, max_moves)
         if stats[1] == 1:
