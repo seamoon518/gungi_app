@@ -1,6 +1,6 @@
 """
 AI engine entry point.
-Phase A/B: setup は優先順位配置、game は alpha-beta 探索（難易度別パラメータ）
+setup は陣形どおりに配置、game は alpha-beta 探索（難易度別パラメータ）
 """
 
 import random
@@ -12,15 +12,6 @@ from logic.setup import get_valid_setup_positions, has_placed_sui
 from logic.game_engine import apply_move, apply_arata, apply_boushou, apply_setup_place, apply_setup_done
 from logic.ai.search import find_best_move
 from logic.ai.weights import load_weights
-
-# setupフェーズの配置優先順（高価値→攻撃駒→守備駒）
-_SETUP_PRIORITY = [
-    PieceType.TAI, PieceType.CHU,
-    PieceType.OZU, PieceType.TSU,
-    PieceType.KIB, PieceType.YAR, PieceType.YUM,
-    PieceType.SAM, PieceType.SHI, PieceType.BOU,
-    PieceType.TOR, PieceType.SHO, PieceType.HYO,
-]
 
 # 難易度パラメータ（tier2評価関数 + 思考時間・ノイズで差別化）
 _DIFFICULTY_PARAMS = {
@@ -51,41 +42,65 @@ def get_ai_move_and_apply(state: GameState) -> Tuple[bool, str]:
 
 # ── setup phase ──────────────────────────────────────────────────────────────
 
+# 初期配置の陣形（白陣から見た (行, 列)。行 0 = 最後列）。
+# 初級編の公式配置（rulebook.md）を土台に、特殊駒（砲・筒・謀）を加えたもの。
+# 相手が早く「済」を宣言して配置が打ち切られても困らないよう、帥の守りから順に並べる。
+_FORMATION = [
+    (0, 4, PieceType.SUI),
+    (0, 3, PieceType.CHU), (0, 5, PieceType.TAI),
+    (1, 4, PieceType.YAR),
+    (2, 3, PieceType.SAM), (2, 4, PieceType.HYO), (2, 5, PieceType.SAM),
+    (2, 2, PieceType.TOR), (2, 6, PieceType.TOR),
+    (1, 2, PieceType.YUM), (1, 6, PieceType.YUM),
+    (1, 1, PieceType.KIB), (1, 7, PieceType.SHI),
+    (2, 0, PieceType.HYO), (2, 8, PieceType.HYO),
+    (0, 1, PieceType.OZU), (0, 7, PieceType.TSU),
+    (1, 3, PieceType.BOU),
+]
+
+
+def _formation_for(player: str, mirror: bool) -> list:
+    """陣形を手番側の座標に変換する（黒は 180° 回転。mirror=True で左右反転）。"""
+    out = []
+    for r, c, pt in _FORMATION:
+        if mirror:
+            c = 8 - c
+        if player == "black":
+            r, c = 8 - r, 8 - c
+        out.append((r, c, pt))
+    return out
+
+
 def _handle_setup(state: GameState, ai_player: str) -> Tuple[bool, str]:
-    """初期配置フェーズ: 帅を置いてから他の駒を優先順で配置 → 済を宣言"""
+    """初期配置フェーズ: 陣形どおりに帥の守りから順に置き、置き終えたら済を宣言する"""
+    valid = set(get_valid_setup_positions(state.board, ai_player, state.rules.max_stack))
+    hand_types = {p.type for p in state.hand_pieces.get(ai_player, [])}
+    # 左右反転するかは対局ごとに固定（盤面から決まる値を使い、手番ごとにぶれないようにする）
+    mirror = (sum(len(st) for row in state.board for st in row) == 0 and random.random() < 0.5) \
+        if not has_placed_sui(state.board, ai_player) else _is_mirrored(state, ai_player)
 
-    # 1) 帅が未配置なら後列中央に置く
+    for r, c, pt in _formation_for(ai_player, mirror):
+        if pt in hand_types and not state.board[r][c] and (r, c) in valid:
+            return apply_setup_place(state, pt.value, r, c)
+
+    # 帥がまだ置けていない（通常は起こらない）ときだけ従来の方法で置く
     if not has_placed_sui(state.board, ai_player):
-        valid = get_valid_setup_positions(state.board, ai_player, state.rules.max_stack)
-        if not valid:
-            return apply_setup_done(state)
         back_row = 8 if ai_player == "black" else 0
-        back_valid = [p for p in valid if p[0] == back_row]
-        pos = min(back_valid or valid, key=lambda p: abs(p[1] - 4))
+        back_valid = [p for p in valid if p[0] == back_row] or list(valid)
+        if not back_valid:
+            return apply_setup_done(state)
+        pos = min(back_valid, key=lambda p: abs(p[1] - 4))
         return apply_setup_place(state, PieceType.SUI.value, pos[0], pos[1])
+    return apply_setup_done(state)
 
-    hand = state.hand_pieces.get(ai_player, [])
-    valid = get_valid_setup_positions(state.board, ai_player, state.rules.max_stack)
 
-    # 2) 盤上自駒数を確認
-    board_count = sum(
-        1 for row in state.board for stack in row
-        for piece in stack if piece.owner == ai_player
-    )
-
-    # 3) 十分配置済み or 置き場なし → 済
-    if not hand or not valid or board_count >= 13:
-        return apply_setup_done(state)
-
-    # 4) 優先順位の高い駒を選ぶ
-    hand_types = {p.type for p in hand}
-    piece_to_place = next(
-        (pt for pt in _SETUP_PRIORITY if pt in hand_types),
-        hand[0].type,
-    )
-
-    pos = random.choice(valid)
-    return apply_setup_place(state, piece_to_place.value, pos[0], pos[1])
+def _is_mirrored(state: GameState, ai_player: str) -> bool:
+    """既に置いた駒が左右反転した陣形と一致するか（反転版の方が多く一致すれば True）"""
+    def matches(m: bool) -> int:
+        return sum(1 for r, c, pt in _formation_for(ai_player, m)
+                   if state.board[r][c] and state.board[r][c][0].type == pt
+                   and state.board[r][c][0].owner == ai_player)
+    return matches(True) > matches(False)
 
 
 # ── game phase ────────────────────────────────────────────────────────────────

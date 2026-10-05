@@ -96,30 +96,6 @@ def _path_clear_jump(
     )
 
 
-# (駒種, 段数, 前進方向) ごとの移動先オフセットと経路をキャッシュする。
-# 合法手生成は探索で最も多く呼ばれるため、gcd や座標変換を毎回計算しないようにする。
-_OFFSET_CACHE: dict = {}
-
-
-def _offsets(piece_type: PieceType, height: int, row_mult: int) -> list:
-    key = (piece_type, height, row_mult)
-    cached = _OFFSET_CACHE.get(key)
-    if cached is not None:
-        return cached
-    if piece_type in JUMP_PIECES:
-        groups = [(JUMP_MOVES[piece_type].get(height, []), True),
-                  (NORMAL_MOVES[piece_type].get(height, []), False)]
-    else:
-        groups = [(FIXED_MOVES.get(piece_type, {}).get(height, []), False)]
-    cached = []
-    for moves, is_jump in groups:
-        for dx, dy in moves:
-            dr, dc = row_mult * dy, dx
-            cached.append((dr, dc, tuple(_get_intermediate_squares(0, 0, dr, dc)), is_jump))
-    _OFFSET_CACHE[key] = cached
-    return cached
-
-
 def _transform(
     src_row: int, src_col: int, dx: int, dy: int, row_mult: int
 ) -> Tuple[int, int]:
@@ -206,8 +182,10 @@ def get_valid_moves(
                     break
                 r, c = r + dr, c + dc
 
-        for dr, dc, path, is_jump in _offsets(piece_type, src_height, row_mult):
-            _try_add(row + dr, col + dc, [(row + pr, col + pc) for pr, pc in path], is_jump)
+        for dx, dy in FIXED_MOVES[PieceType.TAI][src_height]:
+            dst_row, dst_col = _transform(row, col, dx, dy, row_mult)
+            path = _get_intermediate_squares(row, col, dst_row, dst_col)
+            _try_add(dst_row, dst_col, path)
 
     # --- 中（CHU）: unlimited diagonal sliding + fixed cross ---
     elif piece_type == PieceType.CHU:
@@ -231,40 +209,28 @@ def get_valid_moves(
                     break
                 r, c = r + dr, c + dc
 
-        for dr, dc, path, is_jump in _offsets(piece_type, src_height, row_mult):
-            _try_add(row + dr, col + dc, [(row + pr, col + pc) for pr, pc in path], is_jump)
+        for dx, dy in FIXED_MOVES[PieceType.CHU][src_height]:
+            dst_row, dst_col = _transform(row, col, dx, dy, row_mult)
+            path = _get_intermediate_squares(row, col, dst_row, dst_col)
+            _try_add(dst_row, dst_col, path)
 
-    # 弓/筒/砲（跳び→通常の順）とその他の駒（帅を含む）は、キャッシュしたオフセットで判定する。
-    # 探索で最も多く呼ばれる箇所なので _try_add と同じ判定をインラインで行う。
+    # --- 弓/筒/砲: jump + normal moves ---
+    elif piece_type in JUMP_PIECES:
+        for dx, dy in JUMP_MOVES[piece_type][src_height]:
+            dst_row, dst_col = _transform(row, col, dx, dy, row_mult)
+            path = _get_intermediate_squares(row, col, dst_row, dst_col)
+            _try_add(dst_row, dst_col, path, is_jump=True)
+
+        for dx, dy in NORMAL_MOVES[piece_type][src_height]:
+            dst_row, dst_col = _transform(row, col, dx, dy, row_mult)
+            path = _get_intermediate_squares(row, col, dst_row, dst_col)
+            _try_add(dst_row, dst_col, path, is_jump=False)
+
+    # --- All other pieces (including 帅): fixed moves, normal path blocking ---
     else:
-        for dr, dc, path, is_jump in _offsets(piece_type, src_height, row_mult):
-            r2, c2 = row + dr, col + dc
-            if not (0 <= r2 < 9 and 0 <= c2 < 9):
-                continue
-            blocked = False
-            for pr, pc in path:
-                mid = board[row + pr][col + pc]
-                if mid and (not is_jump or len(mid) > src_height):
-                    blocked = True
-                    break
-            if blocked:
-                continue
-            dst_stack = board[r2][c2]
-            if not dst_stack:
-                valid.append((r2, c2))
-                continue
-            h = len(dst_stack)
-            dst_top = dst_stack[-1]
-            tsuke_ok = (not is_sui_no_tsuke and h < max_stack and h <= src_height
-                        and dst_top.type != PieceType.SUI)
-            if dst_top.owner == player:
-                if tsuke_ok:
-                    valid.append((r2, c2))
-            else:
-                if tsuke_ok or h <= src_height:
-                    valid.append((r2, c2))
-                if tsuke_ok:
-                    enemy_tsuke.append((r2, c2))
-
+        for dx, dy in FIXED_MOVES.get(piece_type, {}).get(src_height, []):
+            dst_row, dst_col = _transform(row, col, dx, dy, row_mult)
+            path = _get_intermediate_squares(row, col, dst_row, dst_col)
+            _try_add(dst_row, dst_col, path)
 
     return MoveOptions(valid_moves=valid, enemy_tsuke_moves=enemy_tsuke)

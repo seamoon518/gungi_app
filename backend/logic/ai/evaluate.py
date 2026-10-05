@@ -59,11 +59,22 @@ _SLIDE_MOBILITY = {PieceType.TAI: 18, PieceType.CHU: 18}
 
 # ── ヘルパー ──────────────────────────────────────────────────────────────────
 
+_PIECE_VALUES_CACHE: Dict[tuple, Dict[PieceType, int]] = {}
+
+
 def _piece_values(weights: Optional[dict]) -> Dict[PieceType, int]:
     if weights is None:
         return PIECE_VALUES
     pv_raw = weights.get("piece_values", {})
-    return {PieceType[k]: v for k, v in pv_raw.items()} if pv_raw else PIECE_VALUES
+    if not pv_raw:
+        return PIECE_VALUES
+    # 評価のたびに辞書を作り直すと探索が遅くなるため、内容ごとにキャッシュする
+    key = tuple(pv_raw.items())
+    cached = _PIECE_VALUES_CACHE.get(key)
+    if cached is None:
+        cached = {PieceType[k]: v for k, v in pv_raw.items()}
+        _PIECE_VALUES_CACHE[key] = cached
+    return cached
 
 
 def _hand_ratio(weights: Optional[dict], phase: str) -> float:
