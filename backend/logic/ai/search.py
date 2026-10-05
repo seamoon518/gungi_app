@@ -38,6 +38,7 @@ MAX_KILLER_DEPTH = 16
 _NMP_R = 2
 # Aspiration Window 初期幅
 _ASP_DELTA = 50
+_LOSS_SCORE = 90000   # これ以上（以下）は勝ち（負け）が確定した評価値
 
 
 # ── データ構造 ────────────────────────────────────────────────────────────────
@@ -296,6 +297,24 @@ def _apply_move_inplace(ns: GameState, move: tuple) -> bool:
     return True
 
 
+# ── 評価値キャッシュ ──────────────────────────────────────────────────────────
+# 探索中は同じ局面を何度も評価する（静止探索・反復深化）ため、1回の find_best_move の間だけ
+# 局面ハッシュごとに評価値を覚えておく。
+_EVAL_CACHE: Dict[tuple, int] = {}
+_EVAL_CACHE_MAX = 200_000
+
+
+def _eval(state: GameState, ai_player: str, weights: Optional[dict]) -> int:
+    key = (HASHER.hash_state(state), ai_player, id(weights))
+    v = _EVAL_CACHE.get(key)
+    if v is None:
+        if len(_EVAL_CACHE) >= _EVAL_CACHE_MAX:
+            _EVAL_CACHE.clear()
+        v = evaluate(state, ai_player, weights)
+        _EVAL_CACHE[key] = v
+    return v
+
+
 # ── 局面キー ──────────────────────────────────────────────────────────────────
 
 def _state_key(state: GameState) -> int:
@@ -317,7 +336,7 @@ def quiescence(
     if time.time() - start_time > time_limit:
         raise TimeoutError()
 
-    stand_pat = evaluate(state, ai_player, weights)
+    stand_pat = _eval(state, ai_player, weights)
     maximizing = (state.current_player == ai_player)
 
     if maximizing:
@@ -454,7 +473,7 @@ def _pvs_node(
             and depth >= _NMP_R + 1
             and maximizing
             and not state.game_over):
-        static_eval = evaluate(state, ai_player, weights)
+        static_eval = _eval(state, ai_player, weights)
         if static_eval >= beta:
             null_state = _make_null_move(state)
             null_score = pvs(
@@ -472,7 +491,7 @@ def _pvs_node(
     # ── 合法手生成 + move ordering ───────────────────────────────────────────
     moves = get_all_game_moves(state, current)
     if not moves:
-        return evaluate(state, ai_player, weights)
+        return _eval(state, ai_player, weights)
 
     tt_first = entry[3] if (entry and entry[3] in moves) else None
     moves = _order_moves_full(moves, state.board, depth, killers, history)
@@ -480,14 +499,15 @@ def _pvs_node(
         moves.remove(tt_first)
         moves.insert(0, tt_first)
 
-    if len(moves) > max_moves:
-        moves = moves[:max_moves]
-
     best_score = -inf if maximizing else inf
     best_move  = None
     orig_alpha = alpha
 
     for i, move in enumerate(moves):
+        # 上位 max_moves 手だけ読む。ただし上位がすべて負け（詰み）なら残りも読む
+        # （受けの手を削って偽の詰みを読まないため）
+        if i >= max_moves and not (best_score <= -_LOSS_SCORE if maximizing else best_score >= _LOSS_SCORE):
+            break
         ns = _make_search_copy(state)
         if not _apply_move_inplace(ns, move):
             continue
@@ -567,7 +587,7 @@ def _pvs_node(
                 else TT_EXACT)
         tt.store(key, depth, best_score, flag, best_move)
 
-    fallback = evaluate(state, ai_player, weights)
+    fallback = _eval(state, ai_player, weights)
     if maximizing:
         return best_score if best_score > -inf else fallback
     return best_score if best_score < inf else fallback
@@ -608,6 +628,7 @@ def find_best_move(
     if best_move is None:
         return None
 
+    _EVAL_CACHE.clear()
     tt      = TranspositionTable()
     killers = KillerMoves()
     history = HistoryTable()

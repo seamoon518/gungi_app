@@ -1,5 +1,8 @@
 [build]
 builder = "NIXPACKS"
+# 高速 AI エンジン（Numba）を事前にコンパイルしてキャッシュを作っておく。
+# 失敗しても起動時に自動で作り直す（その間は Python 版の AI で動く）ので、ビルドは止めない。
+buildCommand = "python -c 'from logic.ai import fast; fast.warmup()' || true"
 
 [deploy]
 startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
