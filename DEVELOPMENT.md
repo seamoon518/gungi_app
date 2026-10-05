@@ -72,6 +72,10 @@ cd frontend && npm run dev
 - ✅ Killer Heuristic + MVV-LVA
 - ✅ 評価関数: 駒得 + 位置 + 帅安全度 + スタック価値
 - ✅ 全12パターン（4レベル × 3難易度）動作確認済み
+- ✅ 高速探索エンジン（Numba、`backend/logic/ai/fast/`）: Python 版と同じ探索・評価を約80倍の速さで実行
+  - 起動時にバックグラウンドで準備（コンパイルは別プロセス、キャッシュがあれば約1秒）。準備完了までは Python 版で応答
+  - `GUNGI_FAST_ENGINE=0` で無効化（Python 版のみで動作）
+  - Railway ではビルド時に `fast.warmup()` でキャッシュを作成（`railway.toml`）。メモリは約200MB
 
 ---
 
@@ -173,6 +177,24 @@ cd backend
 python -m tests.sim_ai_vs_ai --out /tmp/sim.jsonl --workers 3 --max-plies 150 \
   --match nyumon:easy:easy:2 --match chukyuu:hard:easy:1
 ```
+
+### AI の強さ比較（arena: エンジン同士の自動対局・Elo 算出）
+```bash
+cd backend
+# 現在のコード(hard) vs 別ツリー(例: main の worktree)の hard、各ルール・先後入替で 120 局
+python -m scripts.arena --a diff=hard,time=0.5 --b tree=/path/to/other/backend,diff=hard,time=0.5 \
+  --games 120 --workers 3 --seed 1 --out /tmp/arena.jsonl
+```
+- 指定できる項目: `tree, diff, time, depth, noise, weights, moves`（候補手数）
+- 結果は勝敗・引分・Elo と 95% 信頼区間。結果は `AI_TUNING_LOG.md` に記録
+
+### 評価関数の自動調整（Texel 法、高速エンジン使用）
+```bash
+cd backend
+python -m scripts.tune_fast gen --games 600 --out /tmp/pos.npz
+python -m scripts.tune_fast tune --positions /tmp/pos.npz --base tier2 --out /tmp/tier3.yaml
+```
+- 採用は必ず arena で判断する（2026-10 の試行では不採用）
 
 ### E2E（Playwright・PC/スマホ）
 ```bash
