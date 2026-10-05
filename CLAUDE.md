@@ -26,3 +26,6 @@ powershell の動作も許可不要
 # よく使うコマンド
 - フロントエンド起動: `npm run dev`
 - バックエンド起動: `uvicorn main:app --reload`
+
+# バージョン表記
+- 編集してデプロイ（main へのマージ）するときは、毎回タイトル画面のバージョン表記（`frontend/app/page.tsx` の「軍儀 ver N」）を 1 つ上げること。
