@@ -985,9 +985,10 @@ def pvs(B, H, HD, SIDE, root_ply, ai, depth, alpha, beta, null_ok, OVER, P, W, P
                                  ev_key, ev_val, stats, deadline, mbuf)
                 returning = True
                 continue
-            if f_null[ply] and d >= 3 and maximizing:
+            # Null Move（P[3]=1 なら AI 側だけでなく相手側の手番でも行う）
+            if f_null[ply] and d >= 3 and (maximizing or P[3] == 1):
                 se = _eval_cached(B, H, HD, SIDE, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
-                if se >= bt:
+                if (maximizing and se >= bt) or ((not maximizing) and se <= a):
                     B[ply + 1][:] = B[ply]
                     H[ply + 1][:] = H[ply]
                     HD[ply + 1][:] = HD[ply]
@@ -996,8 +997,12 @@ def pvs(B, H, HD, SIDE, root_ply, ai, depth, alpha, beta, null_ok, OVER, P, W, P
                     f_stage[ply] = ST_AFTER_NULL
                     ply += 1
                     f_depth[ply] = d - 3
-                    f_alpha[ply] = bt - 1
-                    f_beta[ply] = bt
+                    if maximizing:
+                        f_alpha[ply] = bt - 1
+                        f_beta[ply] = bt
+                    else:
+                        f_alpha[ply] = a
+                        f_beta[ply] = a + 1
                     f_null[ply] = False
                     f_stage[ply] = ST_ENTER
                     continue
@@ -1005,8 +1010,12 @@ def pvs(B, H, HD, SIDE, root_ply, ai, depth, alpha, beta, null_ok, OVER, P, W, P
             continue
 
         if st == ST_AFTER_NULL:
-            if ret >= f_beta[ply]:
+            if maximizing and ret >= f_beta[ply]:
                 ret = f_beta[ply]
+                returning = True
+                continue
+            if (not maximizing) and ret <= f_alpha[ply]:
+                ret = f_alpha[ply]
                 returning = True
                 continue
             f_stage[ply] = ST_GEN
@@ -1050,6 +1059,8 @@ def pvs(B, H, HD, SIDE, root_ply, ai, depth, alpha, beta, null_ok, OVER, P, W, P
             over = _child(B, H, HD, SIDE, ply, m)
             OVER[ply + 1] = (side + 1) if over == 1 else 0
             red = 1 if (d >= 3 and i >= 4 and _is_quiet(m)) else 0
+            if red == 1 and P[4] == 1 and d >= 5 and i >= 8:
+                red = 2   # P[4]=1: 深い局面のかなり後ろの静かな手はさらに浅く読む
             f_red[ply] = red
             a = f_alpha[ply]
             bt = f_beta[ply]
