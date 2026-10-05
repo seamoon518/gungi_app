@@ -550,9 +550,9 @@ def _tick(stats, deadline):
     return stats[1] == 1
 
 
-# 静止探索（取る手だけを 2 手先まで読む）。search.quiescence と同じ判定。
+# 静止探索（取る手だけを qdepth 手先（最大 6）まで読む。既定は 2）。search.quiescence と同じ判定。
 # 再帰関数を別の再帰関数（pvs）から呼ぶと Numba のキャッシュ読み込みで落ちるため、
-# 深さごとに関数を分けて再帰をなくしている（quiescence → _q1 → _q0）。
+# 深さごとに関数を分けて再帰をなくしている（quiescence → _q5 → … → _q1 → _q0）。
 @njit(cache=True, nogil=True)
 def _q0(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, ev_val,
         stats, deadline, mbuf):
@@ -617,7 +617,7 @@ def _q1(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev
 
 
 @njit(cache=True, nogil=True)
-def quiescence(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, ev_val,
+def _q2(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, ev_val,
                stats, deadline, mbuf):
     if _tick(stats, deadline):
         return 0.0
@@ -649,6 +649,194 @@ def quiescence(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB,
         over = _child(B, H, HD, SIDE, ply, ordered[i])
         OVER[ply + 1] = (SIDE[ply] + 1) if over == 1 else 0
         v = _q1(B, H, HD, SIDE, ply + 1, ai, alpha, beta, qdepth - 1, OVER, P, W, PV, HB, HR,
+                  ev_key, ev_val, stats, deadline, mbuf)
+        if stats[1] == 1:
+            return 0.0
+        if maximizing:
+            if v >= beta:
+                return beta
+            alpha = max(alpha, v)
+        else:
+            if v <= alpha:
+                return alpha
+            beta = min(beta, v)
+    return alpha if maximizing else beta
+
+
+@njit(cache=True, nogil=True)
+def _q3(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, ev_val,
+               stats, deadline, mbuf):
+    if _tick(stats, deadline):
+        return 0.0
+    stand = _eval_cached(B, H, HD, SIDE, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+    maximizing = SIDE[ply] == ai
+    if maximizing:
+        if stand >= beta:
+            return beta
+        alpha = max(alpha, stand)
+    else:
+        if stand <= alpha:
+            return alpha
+        beta = min(beta, stand)
+    if qdepth == 0:
+        return stand
+    if OVER[ply] != 0:
+        return 90000.0 if OVER[ply] - 1 == ai else -90000.0
+    moves = mbuf[ply]
+    n = gen_moves(B[ply], H[ply], HD[ply], SIDE[ply], P[0], P[1], moves, 1)
+    # 取る駒の価値が高い順（安定ソート）
+    keys = np.empty(n, np.float64)
+    for i in range(n):
+        tr = (moves[i] >> 12) & 0xF
+        tc = (moves[i] >> 8) & 0xF
+        keys[i] = -ORDER_PV[ptype(B[ply][tr, tc, H[ply][tr, tc] - 1])]
+    order = np.argsort(keys, kind="mergesort")
+    ordered = moves[:n][order].copy()
+    for i in range(n):
+        over = _child(B, H, HD, SIDE, ply, ordered[i])
+        OVER[ply + 1] = (SIDE[ply] + 1) if over == 1 else 0
+        v = _q2(B, H, HD, SIDE, ply + 1, ai, alpha, beta, qdepth - 1, OVER, P, W, PV, HB, HR,
+                  ev_key, ev_val, stats, deadline, mbuf)
+        if stats[1] == 1:
+            return 0.0
+        if maximizing:
+            if v >= beta:
+                return beta
+            alpha = max(alpha, v)
+        else:
+            if v <= alpha:
+                return alpha
+            beta = min(beta, v)
+    return alpha if maximizing else beta
+
+
+@njit(cache=True, nogil=True)
+def _q4(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, ev_val,
+               stats, deadline, mbuf):
+    if _tick(stats, deadline):
+        return 0.0
+    stand = _eval_cached(B, H, HD, SIDE, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+    maximizing = SIDE[ply] == ai
+    if maximizing:
+        if stand >= beta:
+            return beta
+        alpha = max(alpha, stand)
+    else:
+        if stand <= alpha:
+            return alpha
+        beta = min(beta, stand)
+    if qdepth == 0:
+        return stand
+    if OVER[ply] != 0:
+        return 90000.0 if OVER[ply] - 1 == ai else -90000.0
+    moves = mbuf[ply]
+    n = gen_moves(B[ply], H[ply], HD[ply], SIDE[ply], P[0], P[1], moves, 1)
+    # 取る駒の価値が高い順（安定ソート）
+    keys = np.empty(n, np.float64)
+    for i in range(n):
+        tr = (moves[i] >> 12) & 0xF
+        tc = (moves[i] >> 8) & 0xF
+        keys[i] = -ORDER_PV[ptype(B[ply][tr, tc, H[ply][tr, tc] - 1])]
+    order = np.argsort(keys, kind="mergesort")
+    ordered = moves[:n][order].copy()
+    for i in range(n):
+        over = _child(B, H, HD, SIDE, ply, ordered[i])
+        OVER[ply + 1] = (SIDE[ply] + 1) if over == 1 else 0
+        v = _q3(B, H, HD, SIDE, ply + 1, ai, alpha, beta, qdepth - 1, OVER, P, W, PV, HB, HR,
+                  ev_key, ev_val, stats, deadline, mbuf)
+        if stats[1] == 1:
+            return 0.0
+        if maximizing:
+            if v >= beta:
+                return beta
+            alpha = max(alpha, v)
+        else:
+            if v <= alpha:
+                return alpha
+            beta = min(beta, v)
+    return alpha if maximizing else beta
+
+
+@njit(cache=True, nogil=True)
+def _q5(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, ev_val,
+               stats, deadline, mbuf):
+    if _tick(stats, deadline):
+        return 0.0
+    stand = _eval_cached(B, H, HD, SIDE, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+    maximizing = SIDE[ply] == ai
+    if maximizing:
+        if stand >= beta:
+            return beta
+        alpha = max(alpha, stand)
+    else:
+        if stand <= alpha:
+            return alpha
+        beta = min(beta, stand)
+    if qdepth == 0:
+        return stand
+    if OVER[ply] != 0:
+        return 90000.0 if OVER[ply] - 1 == ai else -90000.0
+    moves = mbuf[ply]
+    n = gen_moves(B[ply], H[ply], HD[ply], SIDE[ply], P[0], P[1], moves, 1)
+    # 取る駒の価値が高い順（安定ソート）
+    keys = np.empty(n, np.float64)
+    for i in range(n):
+        tr = (moves[i] >> 12) & 0xF
+        tc = (moves[i] >> 8) & 0xF
+        keys[i] = -ORDER_PV[ptype(B[ply][tr, tc, H[ply][tr, tc] - 1])]
+    order = np.argsort(keys, kind="mergesort")
+    ordered = moves[:n][order].copy()
+    for i in range(n):
+        over = _child(B, H, HD, SIDE, ply, ordered[i])
+        OVER[ply + 1] = (SIDE[ply] + 1) if over == 1 else 0
+        v = _q4(B, H, HD, SIDE, ply + 1, ai, alpha, beta, qdepth - 1, OVER, P, W, PV, HB, HR,
+                  ev_key, ev_val, stats, deadline, mbuf)
+        if stats[1] == 1:
+            return 0.0
+        if maximizing:
+            if v >= beta:
+                return beta
+            alpha = max(alpha, v)
+        else:
+            if v <= alpha:
+                return alpha
+            beta = min(beta, v)
+    return alpha if maximizing else beta
+
+
+@njit(cache=True, nogil=True)
+def quiescence(B, H, HD, SIDE, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, ev_val,
+               stats, deadline, mbuf):
+    if _tick(stats, deadline):
+        return 0.0
+    stand = _eval_cached(B, H, HD, SIDE, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+    maximizing = SIDE[ply] == ai
+    if maximizing:
+        if stand >= beta:
+            return beta
+        alpha = max(alpha, stand)
+    else:
+        if stand <= alpha:
+            return alpha
+        beta = min(beta, stand)
+    if qdepth == 0:
+        return stand
+    if OVER[ply] != 0:
+        return 90000.0 if OVER[ply] - 1 == ai else -90000.0
+    moves = mbuf[ply]
+    n = gen_moves(B[ply], H[ply], HD[ply], SIDE[ply], P[0], P[1], moves, 1)
+    # 取る駒の価値が高い順（安定ソート）
+    keys = np.empty(n, np.float64)
+    for i in range(n):
+        tr = (moves[i] >> 12) & 0xF
+        tc = (moves[i] >> 8) & 0xF
+        keys[i] = -ORDER_PV[ptype(B[ply][tr, tc, H[ply][tr, tc] - 1])]
+    order = np.argsort(keys, kind="mergesort")
+    ordered = moves[:n][order].copy()
+    for i in range(n):
+        over = _child(B, H, HD, SIDE, ply, ordered[i])
+        OVER[ply + 1] = (SIDE[ply] + 1) if over == 1 else 0
+        v = _q5(B, H, HD, SIDE, ply + 1, ai, alpha, beta, qdepth - 1, OVER, P, W, PV, HB, HR,
                   ev_key, ev_val, stats, deadline, mbuf)
         if stats[1] == 1:
             return 0.0
@@ -793,7 +981,7 @@ def pvs(B, H, HD, SIDE, root_ply, ai, depth, alpha, beta, null_ok, OVER, P, W, P
                 returning = True
                 continue
             if d == 0:
-                ret = quiescence(B, H, HD, SIDE, ply, ai, a, bt, 2, OVER, P, W, PV, HB, HR,
+                ret = quiescence(B, H, HD, SIDE, ply, ai, a, bt, P[2], OVER, P, W, PV, HB, HR,
                                  ev_key, ev_val, stats, deadline, mbuf)
                 returning = True
                 continue
