@@ -42,8 +42,12 @@ _KILLER_ROWS = 18   # search.py の MAX_KILLER_DEPTH + 2 と同じ
 
 # コンパイル（初回のみ約 45 秒、2 回目以降はキャッシュから数秒）が終わるまでは Python 版を使う
 _READY = False
-# 置換表などの配列を共有するため、探索は同時に 1 つだけ行う
-_LOCK = threading.Lock()
+# 置換表などの配列は探索ごとに 1 組使う。複数の対局が同時に AI を呼んでも並行して探索できるよう、
+# 配列を最大 GUNGI_FAST_POOL 組（既定 2）まで用意して使い回す（1 組あたり約 45MB）。
+_POOL_SIZE = max(1, int(os.getenv("GUNGI_FAST_POOL", "2")))
+_POOL_SEM = threading.Semaphore(_POOL_SIZE)
+_POOL_LOCK = threading.Lock()
+_POOL_FREE: list = []
 
 
 def available() -> bool:
@@ -80,15 +84,27 @@ class _Buffers:
         self.hist[:] = 0
 
 
-_buf: Optional["_Buffers"] = None
+def _acquire_buffers() -> "_Buffers":
+    _POOL_SEM.acquire()
+    with _POOL_LOCK:
+        b = _POOL_FREE.pop() if _POOL_FREE else None
+    if b is None:
+        b = _Buffers()
+    b.reset()
+    return b
 
 
-def _buffers() -> "_Buffers":
-    global _buf
-    if _buf is None:
-        _buf = _Buffers()
-    _buf.reset()
-    return _buf
+def _release_buffers(b: "_Buffers") -> None:
+    with _POOL_LOCK:
+        _POOL_FREE.append(b)
+    _POOL_SEM.release()
+
+
+def status() -> str:
+    """ヘルスチェック用: ready / warming / unavailable"""
+    if not _AVAILABLE:
+        return "unavailable"
+    return "ready" if _READY else "warming"
 
 
 def find_best_move_fast(
@@ -96,15 +112,17 @@ def find_best_move_fast(
     noise: int = 0, max_moves: int = 25, weights: Optional[dict] = None,
     return_score: bool = False, info: Optional[dict] = None,
 ):
-    with _LOCK:
-        return _find_best_move_locked(state, ai_player, max_depth, time_limit, noise,
+    b = _acquire_buffers()
+    try:
+        return _find_best_move_locked(b, state, ai_player, max_depth, time_limit, noise,
                                       max_moves, weights, return_score, info)
+    finally:
+        _release_buffers(b)
 
 
-def _find_best_move_locked(state, ai_player, max_depth, time_limit, noise, max_moves,
+def _find_best_move_locked(b, state, ai_player, max_depth, time_limit, noise, max_moves,
                            weights, return_score, info):
     start = time.time()
-    b = _buffers()
     board, heights, hands, side = state_to_arrays(state)
     b.B[0], b.H[0], b.HD[0], b.SIDE[0], b.OVER[0] = board, heights, hands, side, 0
     ai = 0 if ai_player == "black" else 1

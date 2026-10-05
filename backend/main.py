@@ -30,4 +30,5 @@ def warmup_fast_engine():
 
 @app.get("/")
 def health():
-    return {"status": "ok"}
+    from logic.ai import fast
+    return {"status": "ok", "fast_engine": fast.status()}
