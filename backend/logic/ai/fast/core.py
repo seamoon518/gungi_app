@@ -996,7 +996,8 @@ def pvs(B, H, HD, SIDE, root_ply, ai, depth, alpha, beta, null_ok, OVER, P, W, P
                     OVER[ply + 1] = 0
                     f_stage[ply] = ST_AFTER_NULL
                     ply += 1
-                    f_depth[ply] = d - 3
+                    # P[5]=1: 残り深さが 6 以上なら Null Move をさらに 1 段浅く読む
+                    f_depth[ply] = d - 4 if (P[5] == 1 and d >= 6) else d - 3
                     if maximizing:
                         f_alpha[ply] = bt - 1
                         f_beta[ply] = bt
