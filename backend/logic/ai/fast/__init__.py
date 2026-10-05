@@ -198,8 +198,21 @@ def start_background_warmup() -> None:
 
 
 def _safe_warmup() -> None:
+    """コンパイルは別プロセスで行い、成功したらキャッシュを読み込む。
+    コンパイル中はメモリを 400MB 以上使うため、メモリ不足で落ちても
+    サーバー本体は巻き込まれず Python 版の AI で動き続けるようにする。"""
     global _AVAILABLE
+    import subprocess
+    import sys
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     try:
-        warmup()
+        r = subprocess.run(
+            [sys.executable, "-c", "from logic.ai import fast; fast.warmup()"],
+            cwd=backend_dir, timeout=900,
+        )
+        if r.returncode != 0:
+            _AVAILABLE = False
+            return
+        warmup()   # キャッシュから読み込むだけなので数秒で終わる
     except Exception:
         _AVAILABLE = False   # コンパイルできなかったら以後は Python 版を使う
