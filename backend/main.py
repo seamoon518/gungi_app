@@ -21,6 +21,13 @@ app.add_middleware(
 app.include_router(router)
 
 
+@app.on_event("startup")
+def warmup_fast_engine():
+    # 高速 AI エンジンのコンパイル（約 45 秒）をバックグラウンドで済ませる
+    from logic.ai import fast
+    fast.start_background_warmup()
+
+
 @app.get("/")
 def health():
     return {"status": "ok"}

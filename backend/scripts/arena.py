@@ -72,6 +72,11 @@ def serve(tree: str) -> None:
     """標準入力から {"state", "params"} を受け取り、AI が指した後の局面を返す。"""
     sys.path.insert(0, os.path.abspath(tree))
     from logic.ai import engine as eng
+    try:  # 高速エンジンがあるツリーでは、対局前にコンパイルを済ませる
+        from logic.ai import fast
+        fast.warmup()
+    except ImportError:
+        pass
     base = {k: dict(v) for k, v in eng._DIFFICULTY_PARAMS.items()}
     out = sys.stdout
     sys.stdout = sys.stderr      # エンジン側の print が通信を壊さないようにする
@@ -122,6 +127,17 @@ class Engine:
             self.proc.kill()
 
 
+_ENGINES: dict = {}
+
+
+def _engine(spec: Dict[str, str]) -> "Engine":
+    """エンジンプロセスはワーカーごとに使い回す（起動時のコンパイルを毎局しないため）。"""
+    key = json.dumps(spec, sort_keys=True)
+    if key not in _ENGINES:
+        _ENGINES[key] = Engine(spec)
+    return _ENGINES[key]
+
+
 # ── 対局 ───────────────────────────────────────────────────────────────────
 
 def _random_opening(state, plies: int, rng: random.Random) -> None:
@@ -144,7 +160,7 @@ def play_game(args) -> dict:
     sys.path.insert(0, BACKEND_DIR)
     from logic.game_engine import create_initial_state, _finish_turn  # noqa: F401
 
-    engines = {"a": Engine(a_spec), "b": Engine(b_spec)}
+    engines = {"a": _engine(a_spec), "b": _engine(b_spec)}
     color_of = {"black": "a" if a_is_black else "b", "white": "b" if a_is_black else "a"}
     rng = random.Random(seed)
     t0 = time.time()
@@ -184,8 +200,7 @@ def play_game(args) -> dict:
                 over, winner, reason = True, None, "sennichite"
                 break
     finally:
-        for e in engines.values():
-            e.close()
+        pass
     if winner is None:
         result = "draw"
     else:

@@ -1,0 +1,815 @@
+"""
+高速エンジン本体（Numba でコンパイルする）。
+
+logic/movement.py・logic/ai/evaluate.py・logic/ai/search.py と同じ判定・評価・探索を
+配列上で行う。Python 版との一致は tests/test_fast_engine.py で確認する。
+"""
+
+import time
+
+import numba
+import numpy as np
+from numba import njit
+
+from logic.ai.fast.tables import (
+    OFF_N, OFF_DR, OFF_DC, OFF_JUMP, OFF_PLEN, OFF_PATH, SLIDE_KIND, SLIDE_DIRS,
+    IS_JUMP_PIECE, MOB, FIX_N, FIX_DX, FIX_DY, JMP_N, JMP_DX, JMP_DY,
+    Z_BOARD, Z_HAND, Z_TURN, CENTER, N_TYPES, T_SUI, T_TAI, T_CHU, T_BOU,
+    W_CENTER, W_STACK_RATIO, W_FORWARD, W_MOBILITY, W_THREAT, W_SUI_THREAT, W_FORTRESS,
+    W_SAFETY_RADIUS, W_SAFETY_PENALTY, W_ISOLATED, W_BOU, W_SUI_MOB, W_RAY, W_HANGING,
+    W_FRONTLINE, W_ARATA, W_PHASE_OPEN, W_PHASE_END, W_HAS_HB,
+    KIND_AUTO, KIND_CAPTURE, KIND_TSUKE_ENEMY, KIND_ARATA, KIND_BOUSHOU,
+)
+
+# 手の並べ替えに使う駒価値（search.py の PIECE_VALUES と同じ Tier0 定数）
+from logic.ai.evaluate import PIECE_VALUES as _PV0
+from logic.ai.fast.tables import PT_INDEX as _PTI
+ORDER_PV = np.zeros(N_TYPES, np.float64)
+for _pt, _v in _PV0.items():
+    ORDER_PV[_PTI[_pt]] = _v
+
+MAX_PLY = 48
+MAX_MOVES_GEN = 1024
+TT_BITS = 20
+TT_SIZE = 1 << TT_BITS
+EV_BITS = 18
+EV_SIZE = 1 << EV_BITS
+TT_EXACT, TT_LOWER, TT_UPPER = 0, 1, 2
+INF = 1e18
+
+
+@njit(cache=True, inline="always")
+def ptype(code):
+    return (code - 1) >> 1
+
+
+@njit(cache=True, inline="always")
+def powner(code):
+    return (code - 1) & 1
+
+
+@njit(cache=True, inline="always")
+def encode(kind, fr, fc, tr, tc, extra):
+    return (kind << 24) | (fr << 20) | (fc << 16) | (tr << 12) | (tc << 8) | extra
+
+
+# ── 合法手（movement.get_valid_moves と同じ順序・判定） ─────────────────────────
+
+@njit(cache=True)
+def valid_moves(board, heights, r, c, max_stack, sui_can_tsuke, out_r, out_c, out_et):
+    """(r,c) の最上段の駒の移動先を out_* に書き、件数を返す。out_et[i]=1 は敵駒へのツケ可。"""
+    h = heights[r, c]
+    if h == 0:
+        return 0
+    code = board[r, c, h - 1]
+    t = ptype(code)
+    player = powner(code)
+    no_tsuke = (t == T_SUI) and (sui_can_tsuke == 0)
+    n = 0
+    sk = SLIDE_KIND[t]
+    if sk != 0:
+        for d in range(4):
+            dr = SLIDE_DIRS[sk, d, 0]
+            dc = SLIDE_DIRS[sk, d, 1]
+            r2 = r + dr
+            c2 = c + dc
+            while 0 <= r2 < 9 and 0 <= c2 < 9:
+                h2 = heights[r2, c2]
+                if h2 == 0:
+                    out_r[n] = r2; out_c[n] = c2; out_et[n] = 0; n += 1
+                else:
+                    top2 = board[r2, c2, h2 - 1]
+                    tsuke_ok = (not no_tsuke) and h2 < max_stack and h2 <= h and ptype(top2) != T_SUI
+                    if powner(top2) == player:
+                        if tsuke_ok:
+                            out_r[n] = r2; out_c[n] = c2; out_et[n] = 0; n += 1
+                    else:
+                        if tsuke_ok or h2 <= h:
+                            out_r[n] = r2; out_c[n] = c2; out_et[n] = 1 if tsuke_ok else 0; n += 1
+                    break
+                r2 += dr
+                c2 += dc
+    hh = h if h <= 3 else 3
+    for k in range(OFF_N[t, hh, player]):
+        r2 = r + OFF_DR[t, hh, player, k]
+        c2 = c + OFF_DC[t, hh, player, k]
+        if not (0 <= r2 < 9 and 0 <= c2 < 9):
+            continue
+        is_jump = OFF_JUMP[t, hh, player, k]
+        blocked = False
+        for j in range(OFF_PLEN[t, hh, player, k]):
+            mh = heights[r + OFF_PATH[t, hh, player, k, j, 0], c + OFF_PATH[t, hh, player, k, j, 1]]
+            if mh > 0 and (is_jump == 0 or mh > h):
+                blocked = True
+                break
+        if blocked:
+            continue
+        h2 = heights[r2, c2]
+        if h2 == 0:
+            out_r[n] = r2; out_c[n] = c2; out_et[n] = 0; n += 1
+            continue
+        top2 = board[r2, c2, h2 - 1]
+        tsuke_ok = (not no_tsuke) and h2 < max_stack and h2 <= h and ptype(top2) != T_SUI
+        if powner(top2) == player:
+            if tsuke_ok:
+                out_r[n] = r2; out_c[n] = c2; out_et[n] = 0; n += 1
+        else:
+            if tsuke_ok or h2 <= h:
+                out_r[n] = r2; out_c[n] = c2; out_et[n] = 1 if tsuke_ok else 0; n += 1
+    return n
+
+
+@njit(cache=True)
+def arata_positions(board, heights, side, max_stack, out_r, out_c):
+    front = -1
+    for r in range(9):
+        for c in range(9):
+            h = heights[r, c]
+            if h > 0 and powner(board[r, c, h - 1]) == side:
+                if side == 0:
+                    if front < 0 or r < front:
+                        front = r
+                else:
+                    if front < 0 or r > front:
+                        front = r
+    if front < 0:
+        return 0
+    n = 0
+    for r in range(9):
+        if side == 0 and r < front:
+            continue
+        if side == 1 and r > front:
+            continue
+        for c in range(9):
+            h = heights[r, c]
+            if h == 0:
+                out_r[n] = r; out_c[n] = c; n += 1
+            else:
+                top = board[r, c, h - 1]
+                if powner(top) == side and h < max_stack and ptype(top) != T_SUI:
+                    out_r[n] = r; out_c[n] = c; n += 1
+    return n
+
+
+@njit(cache=True)
+def gen_moves(board, heights, hands, side, max_stack, sui_can_tsuke, out, captures_only):
+    """search.get_all_game_moves（captures_only=1 なら _get_capture_moves）と同じ手を out に書く。"""
+    vr = np.empty(64, np.int64)
+    vc = np.empty(64, np.int64)
+    ve = np.empty(64, np.int64)
+    n = 0
+    for r in range(9):
+        for c in range(9):
+            h = heights[r, c]
+            if h == 0 or powner(board[r, c, h - 1]) != side:
+                continue
+            t = ptype(board[r, c, h - 1])
+            k = valid_moves(board, heights, r, c, max_stack, sui_can_tsuke, vr, vc, ve)
+            for i in range(k):
+                tr = vr[i]
+                tc = vc[i]
+                h2 = heights[tr, tc]
+                if h2 > 0 and powner(board[tr, tc, h2 - 1]) != side:
+                    out[n] = encode(KIND_CAPTURE, r, c, tr, tc, 0); n += 1
+                    if captures_only == 0 and ve[i] == 1:
+                        out[n] = encode(KIND_TSUKE_ENEMY, r, c, tr, tc, 0); n += 1
+                        if t == T_BOU:
+                            for idx in range(h2):
+                                pc = board[tr, tc, idx]
+                                if powner(pc) != side and hands[side, ptype(pc)] > 0:
+                                    out[n] = encode(KIND_BOUSHOU, r, c, tr, tc, idx); n += 1
+                elif captures_only == 0:
+                    out[n] = encode(KIND_AUTO, r, c, tr, tc, 0); n += 1
+    if captures_only == 0:
+        ar = np.empty(81, np.int64)
+        ac = np.empty(81, np.int64)
+        na = -1
+        for t in range(N_TYPES):
+            if hands[side, t] == 0:
+                continue
+            if na < 0:
+                na = arata_positions(board, heights, side, max_stack, ar, ac)
+            for i in range(na):
+                out[n] = encode(KIND_ARATA, 0, 0, ar[i], ac[i], t); n += 1
+    return n
+
+
+# ── 指し手の適用（search._apply_move_inplace と同じ） ──────────────────────────
+
+@njit(cache=True)
+def make_move(board, heights, hands, side, m):
+    """手を適用する。帥が取られて終局したら 1 を返す。"""
+    kind = (m >> 24) & 0xF
+    fr = (m >> 20) & 0xF
+    fc = (m >> 16) & 0xF
+    tr = (m >> 12) & 0xF
+    tc = (m >> 8) & 0xF
+    extra = m & 0xFF
+    sui_taken = 0
+    if kind == KIND_ARATA:
+        hands[side, extra] -= 1
+        board[tr, tc, heights[tr, tc]] = extra * 2 + side + 1
+        heights[tr, tc] += 1
+        return 0
+    piece = board[fr, fc, heights[fr, fc] - 1]
+    heights[fr, fc] -= 1
+    board[fr, fc, heights[fr, fc]] = 0
+    if kind == KIND_BOUSHOU:
+        hands[side, ptype(board[tr, tc, extra])] -= 1
+        board[tr, tc, extra] = ptype(board[tr, tc, extra]) * 2 + side + 1
+        board[tr, tc, heights[tr, tc]] = piece
+        heights[tr, tc] += 1
+        return 0
+    if kind == KIND_CAPTURE:
+        while heights[tr, tc] > 0 and powner(board[tr, tc, heights[tr, tc] - 1]) != side:
+            if ptype(board[tr, tc, heights[tr, tc] - 1]) == T_SUI:
+                sui_taken = 1
+            heights[tr, tc] -= 1
+            board[tr, tc, heights[tr, tc]] = 0
+    board[tr, tc, heights[tr, tc]] = piece
+    heights[tr, tc] += 1
+    return sui_taken
+
+
+@njit(cache=True)
+def compute_hash(board, heights, hands, side):
+    hsh = np.uint64(0)
+    for r in range(9):
+        for c in range(9):
+            for layer in range(heights[r, c]):
+                code = board[r, c, layer]
+                hsh ^= Z_BOARD[r, c, layer, ptype(code), powner(code)]
+    for o in range(2):
+        for t in range(N_TYPES):
+            cnt = hands[o, t]
+            if cnt > 0:
+                hsh ^= Z_HAND[t, o, cnt if cnt <= 10 else 10]
+    if side == 0:
+        hsh ^= Z_TURN
+    return hsh
+
+
+# ── 評価関数（evaluate.evaluate と同じ） ──────────────────────────────────────
+
+@njit(cache=True)
+def _find_sui(board, heights, player):
+    sr = -1
+    sc = -1
+    for r in range(9):
+        for c in range(9):
+            for layer in range(heights[r, c]):
+                code = board[r, c, layer]
+                if ptype(code) == T_SUI and powner(code) == player:
+                    sr = r
+                    sc = c
+    return sr, sc
+
+
+@njit(cache=True)
+def evaluate(board, heights, hands, ai, max_stack, sui_can_tsuke, W, PV, HB, HR):
+    human = 1 - ai
+    score = 0.0
+
+    # 駒得（フェーズ別の手駒比率）
+    count = 0
+    for r in range(9):
+        for c in range(9):
+            count += heights[r, c]
+    if count >= W[W_PHASE_OPEN]:
+        hand_ratio = HR[0]
+    elif count <= W[W_PHASE_END]:
+        hand_ratio = HR[2]
+    else:
+        hand_ratio = HR[1]
+    for r in range(9):
+        for c in range(9):
+            for layer in range(heights[r, c]):
+                code = board[r, c, layer]
+                t = ptype(code)
+                if t == T_SUI:
+                    continue
+                if powner(code) == ai:
+                    score += PV[t]
+                else:
+                    score -= PV[t]
+    for t in range(N_TYPES):
+        for _ in range(hands[ai, t]):
+            score += float(int(PV[t] * hand_ratio))
+        for _ in range(hands[human, t]):
+            score -= float(int(PV[t] * hand_ratio))
+
+    # 位置・スタック構造・機動力・跳び駒・孤立・射線
+    mob_ai = 0
+    mob_hu = 0
+    for r in range(9):
+        for c in range(9):
+            h = heights[r, c]
+            if h == 0:
+                continue
+            top = board[r, c, h - 1]
+            t = ptype(top)
+            owner = powner(top)
+            sign = 1.0 if owner == ai else -1.0
+            hh = h if h <= 3 else 3
+            if owner == ai:
+                mob_ai += MOB[t, hh]
+            else:
+                mob_hu += MOB[t, hh]
+            if t != T_SUI:
+                center = CENTER[r, c] * W[W_CENTER]
+                stack_bonus = float(int(PV[t] * W[W_STACK_RATIO] * (h - 1)))
+                if owner == 0:
+                    fwd = max(0, 6 - r) * W[W_FORWARD]
+                else:
+                    fwd = max(0, r - 2) * W[W_FORWARD]
+                score += sign * (center + stack_bonus + fwd)
+                if W[W_ISOLATED] != 0:
+                    has_nb = False
+                    for dr in range(-1, 2):
+                        for dc in range(-1, 2):
+                            if dr == 0 and dc == 0:
+                                continue
+                            nr = r + dr
+                            nc = c + dc
+                            if 0 <= nr < 9 and 0 <= nc < 9 and heights[nr, nc] > 0 \
+                                    and powner(board[nr, nc, heights[nr, nc] - 1]) == owner:
+                                has_nb = True
+                    if not has_nb:
+                        score -= sign * float(int(PV[t] * W[W_ISOLATED]))
+            if W[W_HAS_HB] != 0 and h >= 2 and t != T_SUI and t != T_TAI and t != T_CHU:
+                score += sign * float(int(PV[t] * (HB[hh - 1] - 1.0)))
+            if IS_JUMP_PIECE[t] == 1 and (W[W_THREAT] != 0 or W[W_SUI_THREAT] != 0):
+                rm = -1 if owner == 0 else 1
+                for k in range(JMP_N[t, hh]):
+                    tr = r + rm * JMP_DY[t, hh, k]
+                    tc = c + JMP_DX[t, hh, k]
+                    if not (0 <= tr < 9 and 0 <= tc < 9):
+                        continue
+                    h2 = heights[tr, tc]
+                    if h2 == 0 or powner(board[tr, tc, h2 - 1]) == owner:
+                        continue
+                    if ptype(board[tr, tc, h2 - 1]) == T_SUI:
+                        score += sign * W[W_SUI_THREAT]
+                    else:
+                        score += sign * W[W_THREAT]
+            if W[W_RAY] != 0 and (t == T_TAI or t == T_CHU):
+                sk = SLIDE_KIND[t]
+                for d in range(4):
+                    dr = SLIDE_DIRS[sk, d, 0]
+                    dc = SLIDE_DIRS[sk, d, 1]
+                    nr = r + dr
+                    nc = c + dc
+                    while 0 <= nr < 9 and 0 <= nc < 9:
+                        if heights[nr, nc] > 0:
+                            if powner(board[nr, nc, heights[nr, nc] - 1]) == owner:
+                                score -= sign * W[W_RAY]
+                            break
+                        nr += dr
+                        nc += dc
+    if W[W_MOBILITY] != 0:
+        score += (mob_ai - mob_hu) * W[W_MOBILITY]
+
+    # 帥の囲い・帥の安全度・帥の逃げ場
+    for pl in range(2):
+        sign = 1.0 if pl == ai else -1.0
+        sr, sc = _find_sui(board, heights, pl)
+        if sr < 0:
+            continue
+        if W[W_FORTRESS] != 0:
+            thick = 0
+            for dr in range(-1, 2):
+                for dc in range(-1, 2):
+                    if dr == 0 and dc == 0:
+                        continue
+                    nr = sr + dr
+                    nc = sc + dc
+                    if 0 <= nr < 9 and 0 <= nc < 9 and heights[nr, nc] > 0 \
+                            and powner(board[nr, nc, heights[nr, nc] - 1]) == pl:
+                        thick += heights[nr, nc]
+            score += sign * thick * W[W_FORTRESS]
+        rad = int(W[W_SAFETY_RADIUS])
+        danger = 0.0
+        for dr in range(-rad, rad + 1):
+            for dc in range(-rad, rad + 1):
+                nr = sr + dr
+                nc = sc + dc
+                if not (0 <= nr < 9 and 0 <= nc < 9):
+                    continue
+                if heights[nr, nc] > 0 and powner(board[nr, nc, heights[nr, nc] - 1]) != pl:
+                    dist = abs(dr) + abs(dc)
+                    if dist <= 2:
+                        danger -= (3 - dist) * W[W_SAFETY_PENALTY]
+        score += sign * danger
+    if W[W_SUI_MOB] != 0:
+        sm = 0.0
+        for pl in range(2):
+            sign = 1.0 if pl == ai else -1.0
+            rm = -1 if pl == 0 else 1
+            for r in range(9):
+                for c in range(9):
+                    h = heights[r, c]
+                    if h == 0:
+                        continue
+                    top = board[r, c, h - 1]
+                    if ptype(top) != T_SUI or powner(top) != pl:
+                        continue
+                    hh = h if h <= 3 else 3
+                    reach = 0
+                    for k in range(FIX_N[T_SUI, hh]):
+                        tr = r + rm * FIX_DY[T_SUI, hh, k]
+                        tc = c + FIX_DX[T_SUI, hh, k]
+                        if not (0 <= tr < 9 and 0 <= tc < 9):
+                            continue
+                        if heights[tr, tc] == 0 or powner(board[tr, tc, heights[tr, tc] - 1]) != pl:
+                            reach += 1
+                    sm += sign * reach
+        score += W[W_SUI_MOB] * sm
+
+    # 謀の寝返り（経路判定なしの近似、check_boushou_defection と同じ）
+    if W[W_BOU] != 0:
+        for pl in range(2):
+            sign = 1.0 if pl == ai else -1.0
+            rm = -1 if pl == 0 else 1
+            for r in range(9):
+                for c in range(9):
+                    h = heights[r, c]
+                    if h == 0:
+                        continue
+                    top = board[r, c, h - 1]
+                    if ptype(top) != T_BOU or powner(top) != pl:
+                        continue
+                    hh = h if h <= 3 else 3
+                    for k in range(FIX_N[T_BOU, hh]):
+                        tr = r + rm * FIX_DY[T_BOU, hh, k]
+                        tc = c + FIX_DX[T_BOU, hh, k]
+                        if not (0 <= tr < 9 and 0 <= tc < 9):
+                            continue
+                        for layer in range(heights[tr, tc]):
+                            pc = board[tr, tc, layer]
+                            if powner(pc) != pl and hands[pl, ptype(pc)] > 0:
+                                score += sign * float(int(PV[ptype(pc)] * W[W_BOU]))
+
+    # 浮き駒（相手の次の手で取られる自駒）
+    if W[W_HANGING] != 0:
+        attacked = np.zeros((9, 9), np.int64)
+        vr = np.empty(64, np.int64)
+        vc = np.empty(64, np.int64)
+        ve = np.empty(64, np.int64)
+        for r in range(9):
+            for c in range(9):
+                h = heights[r, c]
+                if h == 0 or powner(board[r, c, h - 1]) != human:
+                    continue
+                k = valid_moves(board, heights, r, c, max_stack, sui_can_tsuke, vr, vc, ve)
+                for i in range(k):
+                    h2 = heights[vr[i], vc[i]]
+                    if h2 > 0 and powner(board[vr[i], vc[i], h2 - 1]) == ai:
+                        attacked[vr[i], vc[i]] = 1
+        for r in range(9):
+            for c in range(9):
+                if attacked[r, c] == 1:
+                    top = board[r, c, heights[r, c] - 1]
+                    if ptype(top) != T_SUI:
+                        score -= float(int(PV[ptype(top)] * W[W_HANGING]))
+
+    # 前線・新の支配
+    for pl in range(2):
+        sign = 1.0 if pl == ai else -1.0
+        has_hand = False
+        for t in range(N_TYPES):
+            if hands[pl, t] > 0:
+                has_hand = True
+        if W[W_FRONTLINE] != 0 and has_hand:
+            front = -1
+            for r in range(9):
+                for c in range(9):
+                    h = heights[r, c]
+                    if h > 0 and powner(board[r, c, h - 1]) == pl:
+                        if pl == 0:
+                            if front < 0 or r < front:
+                                front = r
+                        else:
+                            if front < 0 or r > front:
+                                front = r
+            if front >= 0:
+                adv = (8 - front) if pl == 0 else front
+                score += sign * adv * W[W_FRONTLINE]
+    if W[W_ARATA] != 0:
+        ar = np.empty(81, np.int64)
+        ac = np.empty(81, np.int64)
+        tot = 0.0
+        for pl in range(2):
+            sign = 1.0 if pl == ai else -1.0
+            na = arata_positions(board, heights, pl, max_stack, ar, ac)
+            for i in range(na):
+                fwd = (8 - ar[i]) / 8.0 if pl == 0 else ar[i] / 8.0
+                tot += sign * (1.0 + fwd)
+        score += float(int(W[W_ARATA] * tot))
+    return score
+
+
+@njit(cache=True)
+def has_sui(board, heights, player):
+    sr, sc = _find_sui(board, heights, player)
+    return sr >= 0
+
+
+# ── 探索（search.pvs / quiescence と同じアルゴリズム） ──────────────────────────
+
+@njit(cache=True)
+def _now():
+    with numba.objmode(t="float64"):
+        t = time.time()
+    return t
+
+
+@njit(cache=True)
+def _is_quiet(m):
+    kind = (m >> 24) & 0xF
+    return kind == KIND_AUTO or kind == KIND_ARATA
+
+
+@njit(cache=True)
+def _eval_cached(S, ply, ai, P, W, PV, HB, HR, ev_key, ev_val):
+    B, H, HD, SIDE = S
+    key = compute_hash(B[ply], H[ply], HD[ply], SIDE[ply])
+    idx = np.int64(key & np.uint64(EV_SIZE - 1))
+    if ev_key[idx] == key and ev_val[idx] > -1e17:
+        return ev_val[idx]
+    v = evaluate(B[ply], H[ply], HD[ply], ai, P[0], P[1], W, PV, HB, HR)
+    ev_key[idx] = key
+    ev_val[idx] = v
+    return v
+
+
+@njit(cache=True)
+def _child(S, ply, m):
+    """ply の局面をコピーして手 m を指した局面を ply+1 に作る。帥を取ったら 1。"""
+    B, H, HD, SIDE = S
+    B[ply + 1][:] = B[ply]
+    H[ply + 1][:] = H[ply]
+    HD[ply + 1][:] = HD[ply]
+    over = make_move(B[ply + 1], H[ply + 1], HD[ply + 1], SIDE[ply], m)
+    SIDE[ply + 1] = 1 - SIDE[ply]
+    return over
+
+
+@njit(cache=True)
+def _tick(stats, deadline):
+    stats[0] += 1
+    if (stats[0] & 511) == 0 and _now() > deadline:
+        stats[1] = 1
+    return stats[1] == 1
+
+
+@njit(cache=False)  # 再帰関数はキャッシュから読み込むと Numba の不具合で落ちるため毎回コンパイル
+def quiescence(S, ply, ai, alpha, beta, qdepth, OVER, P, W, PV, HB, HR, ev_key, ev_val,
+               stats, deadline, mbuf):
+    if _tick(stats, deadline):
+        return 0.0
+    B, H, HD, SIDE = S
+    stand = _eval_cached(S, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+    maximizing = SIDE[ply] == ai
+    if maximizing:
+        if stand >= beta:
+            return beta
+        alpha = max(alpha, stand)
+    else:
+        if stand <= alpha:
+            return alpha
+        beta = min(beta, stand)
+    if qdepth == 0:
+        return stand
+    if OVER[ply] != 0:
+        return 90000.0 if OVER[ply] - 1 == ai else -90000.0
+    moves = mbuf[ply]
+    n = gen_moves(B[ply], H[ply], HD[ply], SIDE[ply], P[0], P[1], moves, 1)
+    # 取る駒の価値が高い順（安定ソート）
+    keys = np.empty(n, np.float64)
+    for i in range(n):
+        tr = (moves[i] >> 12) & 0xF
+        tc = (moves[i] >> 8) & 0xF
+        keys[i] = -ORDER_PV[ptype(B[ply][tr, tc, H[ply][tr, tc] - 1])]
+    order = np.argsort(keys, kind="mergesort")
+    ordered = moves[:n][order].copy()
+    for i in range(n):
+        over = _child(S, ply, ordered[i])
+        OVER[ply + 1] = (SIDE[ply] + 1) if over == 1 else 0
+        v = quiescence(S, ply + 1, ai, alpha, beta, qdepth - 1, OVER, P, W, PV, HB, HR,
+                       ev_key, ev_val, stats, deadline, mbuf)
+        if stats[1] == 1:
+            return 0.0
+        if maximizing:
+            if v >= beta:
+                return beta
+            alpha = max(alpha, v)
+        else:
+            if v <= alpha:
+                return alpha
+            beta = min(beta, v)
+    return alpha if maximizing else beta
+
+
+@njit(cache=False)  # 再帰関数はキャッシュから読み込むと Numba の不具合で落ちるため毎回コンパイル
+def pvs(S, ply, ai, depth, alpha, beta, null_ok, OVER, P, W, PV, HB, HR,
+        tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
+        stats, deadline, mbuf, max_moves):
+    if _tick(stats, deadline):
+        return 0.0
+    B, H, HD, SIDE = S
+    key = compute_hash(B[ply], H[ply], HD[ply], SIDE[ply])
+
+    # 千日手回避: 実対局の出現回数 + 探索経路上の出現回数が 3 以上なら引き分け扱い
+    gi = np.searchsorted(hist_keys, key)
+    gc = hist_cnt[gi] if gi < hist_keys.shape[0] and hist_keys[gi] == key else 0
+    pc = 0
+    for i in range(1, ply):
+        if path[i] == key:
+            pc += 1
+    if gc + pc >= 3:
+        return 0.0
+    path[ply] = key
+
+    idx = np.int64(key & np.uint64(TT_SIZE - 1))
+    tt_move = -1
+    if tt_k[idx] == key and tt_i[idx, 0] >= 0:
+        tt_move = tt_i[idx, 2]
+        if tt_i[idx, 0] >= depth:
+            s = tt_s[idx]
+            f = tt_i[idx, 1]
+            if f == TT_EXACT:
+                return s
+            if f == TT_LOWER:
+                alpha = max(alpha, s)
+            elif f == TT_UPPER:
+                beta = min(beta, s)
+            if alpha >= beta:
+                return s
+
+    if OVER[ply] != 0:
+        return (100000.0 + depth) if OVER[ply] - 1 == ai else (-100000.0 - depth)
+    if depth == 0:
+        return quiescence(S, ply, ai, alpha, beta, 2, OVER, P, W, PV, HB, HR, ev_key, ev_val,
+                          stats, deadline, mbuf)
+
+    side = SIDE[ply]
+    maximizing = side == ai
+
+    if null_ok and depth >= 3 and maximizing:
+        se = _eval_cached(S, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+        if se >= beta:
+            B[ply + 1][:] = B[ply]
+            H[ply + 1][:] = H[ply]
+            HD[ply + 1][:] = HD[ply]
+            SIDE[ply + 1] = 1 - side
+            OVER[ply + 1] = 0
+            ns = pvs(S, ply + 1, ai, depth - 3, beta - 1, beta, False, OVER, P, W, PV, HB, HR,
+                     tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
+                     stats, deadline, mbuf, max_moves)
+            if stats[1] == 1:
+                return 0.0
+            if ns >= beta:
+                return beta
+
+    moves = mbuf[ply]
+    n = gen_moves(B[ply], H[ply], HD[ply], side, P[0], P[1], moves, 0)
+    if n == 0:
+        return _eval_cached(S, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+
+    # 並べ替え: 取る > キラー > 謀 > 敵へのツケ > 履歴 > 新 > その他（安定ソート）
+    kd = depth if depth < killers.shape[0] else killers.shape[0] - 1
+    keys = np.empty(n, np.float64)
+    for i in range(n):
+        m = moves[i]
+        kind = (m >> 24) & 0xF
+        if kind == KIND_CAPTURE:
+            fr = (m >> 20) & 0xF; fc = (m >> 16) & 0xF; tr = (m >> 12) & 0xF; tc = (m >> 8) & 0xF
+            victim = ORDER_PV[ptype(B[ply][tr, tc, H[ply][tr, tc] - 1])]
+            attacker = ORDER_PV[ptype(B[ply][fr, fc, H[ply][fr, fc] - 1])]
+            pri = 20000.0 + victim * 10 - attacker
+        elif kind == KIND_AUTO or kind == KIND_TSUKE_ENEMY:
+            if depth < killers.shape[0] and m == killers[depth, 0]:
+                pri = 10000.0
+            elif depth < killers.shape[0] and m == killers[depth, 1]:
+                pri = 9000.0
+            elif kind == KIND_TSUKE_ENEMY:
+                pri = 1000.0
+            else:
+                pri = float(hist[(m >> 20) & 0xF, (m >> 16) & 0xF, (m >> 12) & 0xF, (m >> 8) & 0xF])
+        elif kind == KIND_BOUSHOU:
+            pri = 1500.0
+        else:
+            pri = 500.0
+        keys[i] = -pri
+    order = np.argsort(keys, kind="mergesort")
+    ordered = moves[:n][order].copy()
+    if tt_move >= 0:
+        for i in range(n):
+            if ordered[i] == tt_move:
+                for j in range(i, 0, -1):
+                    ordered[j] = ordered[j - 1]
+                ordered[0] = tt_move
+                break
+    if n > max_moves:
+        n = max_moves
+
+    best = -INF if maximizing else INF
+    best_move = -1
+    orig_alpha = alpha
+    for i in range(n):
+        m = ordered[i]
+        over = _child(S, ply, m)
+        OVER[ply + 1] = (side + 1) if over == 1 else 0
+        red = 1 if (depth >= 3 and i >= 4 and _is_quiet(m)) else 0
+        if i == 0:
+            v = pvs(S, ply + 1, ai, depth - 1, alpha, beta, True, OVER, P, W, PV, HB, HR,
+                    tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
+                    stats, deadline, mbuf, max_moves)
+        elif maximizing:
+            v = pvs(S, ply + 1, ai, depth - 1 - red, alpha, alpha + 1, True, OVER, P, W, PV, HB, HR,
+                    tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
+                    stats, deadline, mbuf, max_moves)
+            if v > alpha and red > 0:
+                over = _child(S, ply, m)
+                OVER[ply + 1] = (side + 1) if over == 1 else 0
+                v = pvs(S, ply + 1, ai, depth - 1, alpha, alpha + 1, True, OVER, P, W, PV, HB, HR,
+                        tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
+                        stats, deadline, mbuf, max_moves)
+            if v > alpha and v < beta:
+                over = _child(S, ply, m)
+                OVER[ply + 1] = (side + 1) if over == 1 else 0
+                v = pvs(S, ply + 1, ai, depth - 1, alpha, beta, True, OVER, P, W, PV, HB, HR,
+                        tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
+                        stats, deadline, mbuf, max_moves)
+        else:
+            v = pvs(S, ply + 1, ai, depth - 1 - red, beta - 1, beta, True, OVER, P, W, PV, HB, HR,
+                    tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
+                    stats, deadline, mbuf, max_moves)
+            if v < beta and red > 0:
+                over = _child(S, ply, m)
+                OVER[ply + 1] = (side + 1) if over == 1 else 0
+                v = pvs(S, ply + 1, ai, depth - 1, beta - 1, beta, True, OVER, P, W, PV, HB, HR,
+                        tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
+                        stats, deadline, mbuf, max_moves)
+            if v < beta and v > alpha:
+                over = _child(S, ply, m)
+                OVER[ply + 1] = (side + 1) if over == 1 else 0
+                v = pvs(S, ply + 1, ai, depth - 1, alpha, beta, True, OVER, P, W, PV, HB, HR,
+                        tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
+                        stats, deadline, mbuf, max_moves)
+        if stats[1] == 1:
+            return 0.0
+        if maximizing:
+            if v > best:
+                best = v
+                best_move = m
+            alpha = max(alpha, best)
+        else:
+            if v < best:
+                best = v
+                best_move = m
+            beta = min(beta, best)
+        if alpha >= beta:
+            if _is_quiet(m):
+                if depth < killers.shape[0] and killers[depth, 0] != m:
+                    killers[depth, 1] = killers[depth, 0]
+                    killers[depth, 0] = m
+                if ((m >> 24) & 0xF) == KIND_AUTO:
+                    fr = (m >> 20) & 0xF; fc = (m >> 16) & 0xF; tr = (m >> 12) & 0xF; tc = (m >> 8) & 0xF
+                    hist[fr, fc, tr, tc] = min(hist[fr, fc, tr, tc] + depth * depth, 8000)
+            break
+
+    if best_move >= 0:
+        if best <= orig_alpha:
+            flag = TT_UPPER
+        elif best >= beta:
+            flag = TT_LOWER
+        else:
+            flag = TT_EXACT
+        tt_k[idx] = key
+        tt_i[idx, 0] = depth
+        tt_i[idx, 1] = flag
+        tt_i[idx, 2] = best_move
+        tt_s[idx] = best
+        return best
+    return _eval_cached(S, ply, ai, P, W, PV, HB, HR, ev_key, ev_val)
+
+
+@njit(cache=False)  # 再帰関数はキャッシュから読み込むと Numba の不具合で落ちるため毎回コンパイル
+def search_root(S, ai, depth, lo, hi, root_moves, n_root, out_scores, OVER, P, W, PV, HB, HR,
+                tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
+                stats, deadline, mbuf, max_moves):
+    """ルートの全候補手を深さ depth で評価する（search.find_best_move の 1 反復分）。完了なら 1。"""
+    B, H, HD, SIDE = S
+    alpha_root = lo
+    for i in range(n_root):
+        over = _child(S, 0, root_moves[i])
+        OVER[1] = (SIDE[0] + 1) if over == 1 else 0
+        sc = pvs(S, 1, ai, depth - 1, alpha_root, hi, True, OVER, P, W, PV, HB, HR,
+                 tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
+                 stats, deadline, mbuf, max_moves)
+        if stats[1] == 1:
+            return 0
+        out_scores[i] = sc
+        alpha_root = max(alpha_root, sc)
+    return 1

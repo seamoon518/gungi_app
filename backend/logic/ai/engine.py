@@ -11,6 +11,7 @@ from models.piece import PieceType
 from logic.setup import get_valid_setup_positions, has_placed_sui
 from logic.game_engine import apply_move, apply_arata, apply_boushou, apply_setup_place, apply_setup_done
 from logic.ai.search import find_best_move
+from logic.ai import fast as fast_engine
 from logic.ai.weights import load_weights
 
 # 難易度パラメータ（tier2評価関数 + 思考時間・ノイズで差別化）
@@ -118,7 +119,9 @@ def _handle_game(state: GameState, ai_player: str) -> Tuple[bool, str]:
     max_depth = params["max_depth"]
     weights = load_weights(params.get("weights", "tier1"))
 
-    best = find_best_move(
+    # コンパイル済みの高速エンジンが使えればそちらで探索する（結果は同じアルゴリズム）
+    search = fast_engine.find_best_move_fast if fast_engine.ready() else find_best_move
+    best = search(
         state,
         ai_player,
         max_depth=max_depth,
