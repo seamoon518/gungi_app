@@ -105,12 +105,15 @@ class Engine:
     def __init__(self, spec: Dict[str, str]):
         self.spec = spec
         tree = spec.get("tree", BACKEND_DIR)
+        # 大文字のキー（例: QDEPTH=4）は環境変数 GUNGI_QDEPTH としてエンジンに渡す（探索の調整用）
+        env = dict(os.environ)
+        env.update({"GUNGI_" + k: v for k, v in spec.items() if k.isupper()})
         self.proc = subprocess.Popen(
             [sys.executable, os.path.abspath(__file__), "--serve", tree],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, cwd=tree,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, cwd=tree, env=env,
         )
         self.params = {k: (float(v) if k in ("time",) else int(v) if k in ("depth", "noise", "moves") else v)
-                       for k, v in spec.items() if k != "tree"}
+                       for k, v in spec.items() if k != "tree" and not k.isupper()}
 
     def play(self, state_dict: dict, seed: int) -> dict:
         self.proc.stdin.write(json.dumps({"state": state_dict, "params": self.params, "seed": seed}) + "\n")

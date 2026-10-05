@@ -31,6 +31,12 @@ except Exception:  # numba が入っていない・コンパイルできない�
     _AVAILABLE = False
 
 _ASP_DELTA = 50
+
+
+def _knob(name: str, default):
+    """探索の調整用パラメータ（実験用。環境変数 GUNGI_<name> で上書きできる）。"""
+    v = os.getenv("GUNGI_" + name)
+    return type(default)(v) if v is not None else default
 _KILLER_ROWS = 18   # search.py の MAX_KILLER_DEPTH + 2 と同じ
 
 
@@ -102,7 +108,7 @@ def _find_best_move_locked(state, ai_player, max_depth, time_limit, noise, max_m
     board, heights, hands, side = state_to_arrays(state)
     b.B[0], b.H[0], b.HD[0], b.SIDE[0], b.OVER[0] = board, heights, hands, side, 0
     ai = 0 if ai_player == "black" else 1
-    P = np.array([state.rules.max_stack, 1 if state.rules.sui_can_tsuke else 0], np.int64)
+    P = np.array([state.rules.max_stack, 1 if state.rules.sui_can_tsuke else 0, _knob("QDEPTH", 2)], np.int64)
     W, PV, HB, HR = weights_to_arrays(weights or {})
 
     gen = np.zeros(core.MAX_MOVES_GEN, np.int64)
