@@ -113,6 +113,7 @@ test.describe("D: AIと対戦", () => {
     await press(cell(page, 5, 0), ti);
     await waitFor(() => log.latest?.move_count ?? 0, (n) => n >= 2, 30_000);
     await press(panel(page, "black").getByRole("button", { name: "待った" }), ti);
+    await press(page.getByRole("dialog").getByRole("button", { name: "待った" }), ti);
     await waitFor(() => log.latest?.move_count, (n) => n === 0, 10_000);
     expect(JSON.stringify(log.latest!.board)).toBe(initial);
     await expect.poll(() => topPiece(page, 6, 0)).toBe("兵");
