@@ -1,0 +1,43 @@
+piece_values:
+  SUI: 100000
+  TAI: 403.1
+  CHU: 316.6
+  OZU: 228.6
+  TSU: 218.7
+  KIB: 109.2
+  YAR: 123.4
+  YUM: 132.5
+  SHO: 174.6
+  SAM: 98.8
+  SHI: 108.1
+  BOU: 69.5
+  TOR: 73.7
+  HYO: 41.3
+hand_piece_ratio:
+  opening: 1.658
+  middle: 1.538
+  endgame: 1.394
+phase_thresholds:
+  opening: 35
+  endgame: 19
+center_weight: 5.103
+stack_bonus_ratio: 0
+forward_weight: 2.819
+sui_safety_radius: 3
+sui_safety_penalty: 48.9
+stack_height_bonus:
+- 1.0
+- 1.36
+- 1.66
+stack_risk_penalty_ratio: 0
+mobility_weight: 4.143
+jumping_threat_weight: 19.6
+jumping_sui_threat_weight: 195.1
+sui_fortress_weight: 20.5
+isolated_penalty_ratio: 0.065
+bou_defect_weight: 0.382
+sui_mobility_weight: 0
+ray_blocking_weight: 0
+hanging_penalty_ratio: 0.18
+frontline_weight: 9.914
+arata_control_weight: 0
