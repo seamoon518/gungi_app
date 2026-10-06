@@ -117,7 +117,7 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--time", type=float, default=0.05)
     ap.add_argument("--max-plies", type=int, default=200)
-    ap.add_argument("--lr", type=float, default=0.6, help="1 組あたりの移動量（c に対する倍率）")
+    ap.add_argument("--lr", type=float, default=0.1, help="1 組あたりの移動量（c に対する倍率）")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
