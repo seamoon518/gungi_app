@@ -209,20 +209,36 @@ def tune(a):
     B, H, HD, P, S, R = B[quiet], H[quiet], HD[quiet], P[quiet], S[quiet], R[quiet]
     n = len(R)
 
-    # 探索値の尺度（評価値→勝率）を勝敗から合わせ、正解 = λ*勝敗 + (1-λ)*探索値の勝率
-    ks = min((100, 150, 200, 300, 400, 600, 800, 1200, 1600, 2400, 3200, 4800),
-             key=lambda K: float(np.mean((R - _sig(S, K)) ** 2)))
-    T = a.lam * R + (1 - a.lam) * _sig(S, ks)
-    print(f"search-score K={ks} target mean={T.mean():.3f}", flush=True)
-
+    SIDE = SIDE[quiet]
+    sgn = np.where(SIDE == 0, 1.0, -1.0)
     evals = np.zeros(n)
+    if a.lam > 0:
+        # 探索値の尺度（評価値→勝率）を勝敗から合わせ、正解 = λ*勝敗 + (1-λ)*探索値の勝率
+        ks = min((100, 150, 200, 300, 400, 600, 800, 1200, 1600, 2400, 3200, 4800),
+                 key=lambda K: float(np.mean((R - _sig(S, K)) ** 2)))
+        T = a.lam * R + (1 - a.lam) * _sig(S, ks)
+        print(f"search-score K={ks} target mean={T.mean():.3f}", flush=True)
 
-    def loss(w, K):
-        Wa, PVa, HBa, HRa = weights_to_arrays(w)
+        def loss(w, K):
+            Wa, PVa, HBa, HRa = weights_to_arrays(w)
+            eval_all(B, H, HD, P, Wa, PVa, HBa, HRa, evals)
+            return float(np.mean((T - _sig(evals, K)) ** 2))
+
+        K = min((100, 150, 200, 300, 400, 600, 800, 1200, 1600, 2400), key=lambda K: loss(w, K))
+    else:
+        # 蒸留: 静的評価を探索値に近づける。探索値には手番側の有利（テンポ）が入っているので差し引く。
+        # 両辺を同じ K で勝率に変換するので、評価値の尺度は探索値に固定される（重みが縮むことはない）
         eval_all(B, H, HD, P, Wa, PVa, HBa, HRa, evals)
-        return float(np.mean((T - _sig(evals, K)) ** 2))
+        tempo = float(np.mean((S - evals) * sgn))
+        T = _sig(S - tempo * sgn, a.k)
+        K = a.k
+        print(f"distill: tempo={tempo:.1f} K={K}", flush=True)
 
-    K = min((100, 150, 200, 300, 400, 600, 800, 1200, 1600, 2400), key=lambda K: loss(w, K))
+        def loss(w, K):
+            Wa, PVa, HBa, HRa = weights_to_arrays(w)
+            eval_all(B, H, HD, P, Wa, PVa, HBa, HRa, evals)
+            return float(np.mean((T - _sig(evals, K)) ** 2))
+
     cur = loss(w, K)
     base_loss = cur
     print(f"K={K} initial loss={cur:.6f}", flush=True)
@@ -273,7 +289,8 @@ def main():
     t = sub.add_parser("tune")
     t.add_argument("--positions", nargs="+", required=True, help="npz ファイル（glob 可。例: '/tmp/pos.npz.part*.npz'）")
     t.add_argument("--base", default="tier2")
-    t.add_argument("--lam", type=float, default=0.5, help="正解のうち勝敗の割合（残りは探索値）")
+    t.add_argument("--lam", type=float, default=0.0, help="正解のうち勝敗の割合（0 なら探索値の蒸留のみ）")
+    t.add_argument("--k", type=float, default=600, help="蒸留時の評価値→勝率の尺度")
     t.add_argument("--hours", type=float, default=2.0)
     t.add_argument("--out", required=True)
     a = ap.parse_args()
