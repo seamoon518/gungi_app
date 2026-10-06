@@ -124,6 +124,8 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showHomeConfirm, setShowHomeConfirm] = useState(false);
+  // 待った・投了の確認（押し間違い防止）
+  const [confirmAction, setConfirmAction] = useState<"undo" | "resign" | null>(null);
   // 謀の寝返り：対象選択モーダル用
   const [boushouTargets, setBoushouTargets] = useState<{ index: number; piece: Piece }[] | null>(null);
   // AI の思考中フラグと、自動再試行でも回復しなかったエラー（再試行ボタンで再開）
@@ -526,6 +528,42 @@ export default function Home() {
     </div>
   ) : null;
 
+  const actionConfirmModal = confirmAction ? (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]">
+      <div role="dialog" aria-modal="true" aria-label={confirmAction === "undo" ? "待ったの確認" : "投了の確認"}
+        className="bg-white rounded-2xl shadow-xl p-6 w-72 flex flex-col gap-4">
+        <p className="text-center font-bold text-gray-800">
+          {confirmAction === "undo" ? "待ったしますか？" : "投了しますか？"}
+        </p>
+        <p className="text-center text-sm text-gray-500">
+          {confirmAction === "undo"
+            ? (gameState?.mode === "ai" ? "直前の自分の手（と AI の応手）を取り消します。" : "直前の手を取り消します。")
+            : "負けが確定し、対局が終了します。"}
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setConfirmAction(null)}
+            className="flex-1 py-2.5 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium"
+          >
+            キャンセル
+          </button>
+          <button
+            onClick={() => {
+              const a = confirmAction;
+              setConfirmAction(null);
+              if (a === "undo") handleUndo(); else handleResign();
+            }}
+            className={`flex-1 py-2.5 text-white rounded-lg text-sm font-medium ${
+              confirmAction === "undo" ? "bg-orange-500 hover:bg-orange-600" : "bg-red-500 hover:bg-red-600"
+            }`}
+          >
+            {confirmAction === "undo" ? "待った" : "投了する"}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   // ─── ルール選択画面（PvP/AI 共通） ──────────────────────────────────
   const renderRuleSelect = (backScreen: Screen) => (
     <>
@@ -564,7 +602,7 @@ export default function Home() {
   if (screen === "title") {
     return (
       <main className="min-h-screen bg-amber-50 flex flex-col items-center justify-center gap-8 p-4 w-full">
-        <h1 className="text-4xl sm:text-5xl font-bold tracking-widest text-gray-800">軍儀 <span className="text-lg font-normal text-gray-400">ver 7</span></h1>
+        <h1 className="text-4xl sm:text-5xl font-bold tracking-widest text-gray-800">軍儀 <span className="text-lg font-normal text-gray-400">ver 8</span></h1>
         <p className="text-gray-500 text-sm">HUNTER×HUNTER の思考型ボードゲーム</p>
         <button
           onClick={() => { setNotice(null); setScreen("mode_select"); }}
@@ -860,9 +898,9 @@ export default function Home() {
                 gizokuMode={gizokuMode}
                 onHandPieceClick={handleHandPieceClick}
                 onGizokuToggle={gizokuReset}
-                onResign={handleResign}
+                onResign={() => setConfirmAction("resign")}
                 onSetupDone={handleSetupDone}
-                onUndo={handleUndo}
+                onUndo={() => setConfirmAction("undo")}
                 error={gameState.current_player === "white" ? error : null}
               />
             );
@@ -876,9 +914,9 @@ export default function Home() {
                 gizokuMode={gizokuMode}
                 onHandPieceClick={handleHandPieceClick}
                 onGizokuToggle={gizokuReset}
-                onResign={handleResign}
+                onResign={() => setConfirmAction("resign")}
                 onSetupDone={handleSetupDone}
-                onUndo={handleUndo}
+                onUndo={() => setConfirmAction("undo")}
                 error={gameState.current_player === "black" ? error : null}
               />
             );
@@ -997,7 +1035,7 @@ export default function Home() {
         </div>
       )}
     </main>
-    {homeBtn}{homeConfirmModal}
+    {homeBtn}{homeConfirmModal}{actionConfirmModal}
     </>
   );
 }
