@@ -18,7 +18,7 @@ from logic.ai.weights import load_weights
 _DIFFICULTY_PARAMS = {
     "easy":   {"max_depth": 4,  "time_limit": 1.0,  "noise": 50, "max_moves": 20, "weights": "tier2"},
     "normal": {"max_depth": 8,  "time_limit": 3.0,  "noise": 10, "max_moves": 20, "weights": "tier2"},
-    "hard":   {"max_depth": 12, "time_limit": 5.0,  "noise": 0,  "max_moves": 15, "weights": "tier2"},
+    "hard":   {"max_depth": 30, "time_limit": 5.0,  "noise": 0,  "max_moves": 15, "weights": "tier2"},
 }
 
 # レベル別の深さ調整（time_limit 主導になったため全レベル 1.0 に統一）
