@@ -892,6 +892,18 @@ def _order(B, H, ply, n, depth, killers, hist, moves, out):
 
 
 @njit(cache=True, nogil=True)
+def sui_attacked(board, heights, hands, side, max_stack, sui_can_tsuke, buf):
+    """side の帥が相手に取られる位置にあるか（帥の上には駒が乗らないので、常にスタックの最上段）。"""
+    n = gen_moves(board, heights, hands, 1 - side, max_stack, sui_can_tsuke, buf, 1)
+    for i in range(n):
+        tr = (buf[i] >> 12) & 0xF
+        tc = (buf[i] >> 8) & 0xF
+        if ptype(board[tr, tc, heights[tr, tc] - 1]) == T_SUI:
+            return True
+    return False
+
+
+@njit(cache=True, nogil=True)
 def pvs(B, H, HD, SIDE, root_ply, ai, depth, alpha, beta, null_ok, OVER, P, W, PV, HB, HR,
         tt_k, tt_i, tt_s, killers, hist, ev_key, ev_val, path, hist_keys, hist_cnt,
         stats, deadline, mbuf, max_moves):
@@ -951,6 +963,11 @@ def pvs(B, H, HD, SIDE, root_ply, ai, depth, alpha, beta, null_ok, OVER, P, W, P
                 returning = True
                 continue
             path[ply] = key
+            # P[6]=1: 手番側の帥が取られる位置にあるときは 1 手深く読む（王手延長）
+            if P[6] == 1 and d >= 1 and ply - root_ply < 16 and ply + 1 < n_ply and \
+                    sui_attacked(B[ply], H[ply], HD[ply], side, P[0], P[1], mbuf[ply + 1]):
+                d += 1
+                f_depth[ply] = d
             idx = np.int64(key & np.uint64(TT_SIZE - 1))
             f_key[ply] = key
             f_idx[ply] = idx
