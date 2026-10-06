@@ -8,8 +8,9 @@ tune_fast.py との違い:
 
 1. 局面生成（高速エンジンで自己対戦。全ルール）:
     python -m scripts.tune_eval gen --games 3000 --workers 4 --time 0.1 --out /tmp/pos.npz
+   （/tmp/pos.npz.part000.npz, part001, ... に 100 局ずつ保存。止まったら同じコマンドで続きから）
 2. 重みの調整:
-    python -m scripts.tune_eval tune --positions /tmp/pos.npz --base tier2 --out /tmp/tier3.yaml
+    python -m scripts.tune_eval tune --positions '/tmp/pos.npz.part*.npz' --base tier2 --out /tmp/tier3.yaml
 3. 採用判断は arena で行う（例: --a weights=/tmp/tier3.yaml --b weights=tier2）
 """
 
@@ -75,20 +76,27 @@ def _play(args):
 
 
 def gen(a):
+    """100 局ごとに {out}.partNNN.npz へ保存する（途中で止まっても集めた分は残る。再実行すると続きから）。"""
+    import glob
     levels = ["nyumon", "shokyuu", "chukyuu", "joukyuu"]
-    jobs = [(levels[i % 4], a.seed * 100000 + i, a.time, a.noise, a.skip, a.weights) for i in range(a.games)]
-    B, H, HD, P, SIDE, S, R = [], [], [], [], [], [], []
+    done_parts = sorted(glob.glob(a.out + ".part*.npz"))
+    start = len(done_parts) * 100
+    jobs = [(levels[i % 4], a.seed * 100000 + i, a.time, a.noise, a.skip, a.weights)
+            for i in range(start, a.games)]
+    buf = ([], [], [], [], [], [], [])
+    part = len(done_parts)
     t0 = time.time()
     with Pool(a.workers) as pool:
-        for k, (rec, res) in enumerate(pool.imap_unordered(_play, jobs), 1):
+        for k, (rec, res) in enumerate(pool.imap(_play, jobs), start + 1):
             for b, h, hd, ms, st, side, sc in rec:
-                B.append(b); H.append(h); HD.append(hd); P.append((ms, st)); SIDE.append(side)
-                S.append(sc); R.append(res)
-            if k % 50 == 0:
-                print(f"games={k} positions={len(R)} {time.time() - t0:.0f}s", flush=True)
-            if k % 500 == 0 or k == a.games:
-                _save(a.out, B, H, HD, P, SIDE, S, R)
-    print(f"saved {len(R)} positions to {a.out}")
+                for lst, v in zip(buf, (b, h, hd, (ms, st), side, sc, res)):
+                    lst.append(v)
+            if k % 100 == 0 or k == a.games:
+                _save(f"{a.out}.part{part:03d}.npz", *buf)
+                print(f"games={k} part={part} positions={len(buf[0])} {time.time() - t0:.0f}s", flush=True)
+                part += 1
+                buf = ([], [], [], [], [], [], [])
+    print("done")
 
 
 def _save(path, B, H, HD, P, SIDE, S, R):
@@ -155,8 +163,12 @@ def tune(a):
     from logic.ai.fast.tables import weights_to_arrays, N_TYPES
     from logic.ai.weights import load_weights
 
-    d = np.load(a.positions)
-    B, H, HD, P, SIDE, S, R = d["B"], d["H"], d["HD"], d["P"], d["SIDE"], d["S"], d["R"]
+    import glob
+    files = sorted(sum((glob.glob(p) for p in a.positions), []))
+    ds = [np.load(f) for f in files]
+    B, H, HD, P, SIDE, S, R = (np.concatenate([d[k] for d in ds if len(d["R"])])
+                               for k in ("B", "H", "HD", "P", "SIDE", "S", "R"))
+    print(f"files={len(files)}", flush=True)
     n = len(R)
     print(f"positions={n} (black win {np.mean(R == 1):.2f}, draw {np.mean(R == 0.5):.2f})", flush=True)
 
@@ -259,7 +271,7 @@ def main():
     g.add_argument("--seed", type=int, default=1)
     g.add_argument("--out", required=True)
     t = sub.add_parser("tune")
-    t.add_argument("--positions", required=True)
+    t.add_argument("--positions", nargs="+", required=True, help="npz ファイル（glob 可。例: '/tmp/pos.npz.part*.npz'）")
     t.add_argument("--base", default="tier2")
     t.add_argument("--lam", type=float, default=0.5, help="正解のうち勝敗の割合（残りは探索値）")
     t.add_argument("--hours", type=float, default=2.0)
