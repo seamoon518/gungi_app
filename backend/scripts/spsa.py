@@ -42,6 +42,10 @@ PARAMS = [(f"piece_values.{k}", c, 10, 1500) for k, c in
     ("bou_defect_weight", 0.15, 0, 3),
     ("hanging_penalty_ratio", 0.03, 0, 1),
     ("frontline_weight", 4, 0, 100),
+    # 帥の周りへの攻め（高速エンジンのみの評価項目）
+    ("sui_zone_attack_weight", 3, 0, 60),
+    ("sui_check_weight", 40, 0, 800),
+    ("sui_escape_weight", 8, 0, 150),
 ]
 
 
@@ -119,12 +123,18 @@ def main():
     ap.add_argument("--max-plies", type=int, default=200)
     ap.add_argument("--lr", type=float, default=0.1, help="1 組あたりの移動量（c に対する倍率）")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--only", help="調整する項目をキーの一部で絞る（カンマ区切り。例: sui_,hanging）")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
+    global PARAMS
+    if a.only:
+        keys = a.only.split(",")
+        PARAMS = [p for p in PARAMS if any(k in p[0] for k in keys)]
+        print("params:", [p[0] for p in PARAMS], flush=True)
 
     from logic.ai.weights import load_weights
     base = copy.deepcopy(load_weights(a.base))
-    theta = np.array([float(_get(base, p)) for p, *_ in PARAMS])
+    theta = np.array([float(base.get(p, 0)) if "." not in p else float(_get(base, p)) for p, *_ in PARAMS])
     c = np.array([p[1] for p in PARAMS], float)
     start = 0
     state_path = a.out + ".json"

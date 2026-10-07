@@ -103,13 +103,14 @@ CENTER = np.array([
 # ── 評価関数の重み（配列化） ────────────────────────────────────────────────
 W_CENTER, W_STACK_RATIO, W_FORWARD, W_MOBILITY, W_THREAT, W_SUI_THREAT, W_FORTRESS, \
     W_SAFETY_RADIUS, W_SAFETY_PENALTY, W_ISOLATED, W_BOU, W_SUI_MOB, W_RAY, W_HANGING, \
-    W_FRONTLINE, W_ARATA, W_PHASE_OPEN, W_PHASE_END, W_HAS_HB = range(19)
+    W_FRONTLINE, W_ARATA, W_PHASE_OPEN, W_PHASE_END, W_HAS_HB, \
+    W_KZ_ATTACK, W_SUI_CHECK, W_SUI_ESCAPE = range(22)
 
 
 def weights_to_arrays(weights: dict):
     """evaluate.py の各関数と同じ既定値で重みを配列にする。"""
     g = weights.get
-    w = np.zeros(19, np.float64)
+    w = np.zeros(22, np.float64)
     w[W_CENTER] = g("center_weight", 3)
     w[W_STACK_RATIO] = g("stack_bonus_ratio", 0.12)
     w[W_FORWARD] = g("forward_weight", 5)
@@ -126,6 +127,10 @@ def weights_to_arrays(weights: dict):
     w[W_HANGING] = g("hanging_penalty_ratio", 0)
     w[W_FRONTLINE] = g("frontline_weight", 0)
     w[W_ARATA] = g("arata_control_weight", 0)
+    # 帥の周りへの攻め（高速エンジンのみ。Python 版の evaluate には無い）
+    w[W_KZ_ATTACK] = g("sui_zone_attack_weight", 0)
+    w[W_SUI_CHECK] = g("sui_check_weight", 0)
+    w[W_SUI_ESCAPE] = g("sui_escape_weight", 0)
     th = g("phase_thresholds", {}) or {}
     w[W_PHASE_OPEN] = th.get("opening", 35)
     w[W_PHASE_END] = th.get("endgame", 19)
