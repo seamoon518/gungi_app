@@ -15,6 +15,7 @@ from logic.ai.fast.tables import (
     W_CENTER, W_STACK_RATIO, W_FORWARD, W_MOBILITY, W_THREAT, W_SUI_THREAT, W_FORTRESS,
     W_SAFETY_RADIUS, W_SAFETY_PENALTY, W_ISOLATED, W_BOU, W_SUI_MOB, W_RAY, W_HANGING,
     W_FRONTLINE, W_ARATA, W_PHASE_OPEN, W_PHASE_END, W_HAS_HB,
+    W_KZ_ATTACK, W_SUI_CHECK, W_SUI_ESCAPE,
     KIND_AUTO, KIND_CAPTURE, KIND_TSUKE_ENEMY, KIND_ARATA, KIND_BOUSHOU,
 )
 
@@ -502,6 +503,61 @@ def evaluate(board, heights, hands, ai, max_stack, sui_can_tsuke, W, PV, HB, HR)
                 fwd = (8 - ar[i]) / 8.0 if pl == 0 else ar[i] / 8.0
                 tot += sign * (1.0 + fwd)
         score += float(int(W[W_ARATA] * tot))
+
+    # 帥の周りへの攻め: 相手の駒が帥の周り 8 マスに何手で届くか・帥を取れるか（王手）・安全な逃げ場の数
+    if W[W_KZ_ATTACK] != 0 or W[W_SUI_CHECK] != 0 or W[W_SUI_ESCAPE] != 0:
+        score += _sui_attack_terms(board, heights, ai, max_stack, sui_can_tsuke, W)
+    return score
+
+
+@njit(cache=True, nogil=True)
+def _sui_attack_terms(board, heights, ai, max_stack, sui_can_tsuke, W):
+    att = np.zeros((2, 9, 9), np.int64)   # att[pl, r, c] = pl の駒が (r, c) へ動ける手の数
+    vr = np.empty(64, np.int64)
+    vc = np.empty(64, np.int64)
+    ve = np.empty(64, np.int64)
+    for r in range(9):
+        for c in range(9):
+            h = heights[r, c]
+            if h == 0:
+                continue
+            pl = powner(board[r, c, h - 1])
+            k = valid_moves(board, heights, r, c, max_stack, sui_can_tsuke, vr, vc, ve)
+            for i in range(k):
+                att[pl, vr[i], vc[i]] += 1
+    score = 0.0
+    for pl in range(2):
+        sign = 1.0 if pl == ai else -1.0
+        en = 1 - pl
+        sr, sc = _find_sui(board, heights, pl)
+        if sr < 0:
+            continue
+        zone = 0
+        for dr in range(-1, 2):
+            for dc in range(-1, 2):
+                if dr == 0 and dc == 0:
+                    continue
+                nr = sr + dr
+                nc = sc + dc
+                if 0 <= nr < 9 and 0 <= nc < 9:
+                    zone += att[en, nr, nc]
+        score -= sign * zone * W[W_KZ_ATTACK]
+        if att[en, sr, sc] > 0:
+            score -= sign * W[W_SUI_CHECK]
+        if W[W_SUI_ESCAPE] != 0:
+            hh = heights[sr, sc] if heights[sr, sc] <= 3 else 3
+            rm = -1 if pl == 0 else 1
+            esc = 0
+            for k in range(FIX_N[T_SUI, hh]):
+                tr = sr + rm * FIX_DY[T_SUI, hh, k]
+                tc = sc + FIX_DX[T_SUI, hh, k]
+                if not (0 <= tr < 9 and 0 <= tc < 9):
+                    continue
+                if heights[tr, tc] > 0 and powner(board[tr, tc, heights[tr, tc] - 1]) == pl:
+                    continue
+                if att[en, tr, tc] == 0:
+                    esc += 1
+            score += sign * esc * W[W_SUI_ESCAPE]
     return score
 
 
