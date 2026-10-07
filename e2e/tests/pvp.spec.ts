@@ -103,11 +103,19 @@ test.describe("C: プレイヤー同士", () => {
   test("C7 待った・投了・終局表示", async ({ page }, ti) => {
     await startPvp(page, "入門編", ti);
     await mv(page, ti, 6, 0, 5, 0);
+    // 確認でキャンセルすると何も起きない
     await press(panel(page, "white").getByRole("button", { name: "待った" }), ti);
+    await press(page.getByRole("dialog").getByRole("button", { name: "キャンセル" }), ti);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(await topPiece(page, 5, 0)).toBe("兵");
+    await press(panel(page, "white").getByRole("button", { name: "待った" }), ti);
+    await press(page.getByRole("dialog").getByRole("button", { name: "待った" }), ti);
     await expect.poll(() => topPiece(page, 6, 0)).toBe("兵");
     expect(await topPiece(page, 5, 0)).toBe("");
     await expect(panel(page, "black")).toContainText("▶ 手番");
     await press(panel(page, "black").getByRole("button", { name: "投了" }), ti);
+    await expect(page.getByRole("dialog")).toContainText("投了しますか？");
+    await press(page.getByRole("dialog").getByRole("button", { name: "投了する" }), ti);
     await expect(page.getByText("ゲーム終了")).toBeVisible();
     await expect(page.getByText("白陣 の勝利！")).toBeVisible();
     // 終局後は駒を動かせない
